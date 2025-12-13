@@ -1,0 +1,14 @@
+asyncio
+aiohttp
+fastapi
+uvicorn
+pydantic
+sqlalchemy
+redis
+celery
+websockets
+httpx
+concurrent.futures
+logging
+typing-extensions
+dataclasses-json
