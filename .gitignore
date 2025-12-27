@@ -1,5 +1,73 @@
+# Environment
 .env
-venv/
+.env.local
+.env.*.local
+
+# Sessions & Credentials (NEVER commit these)
+sessions/
+*.session.json
+instagram_session.json
+
+# Service account (contains secrets)
+service_account.json
+
+# Logs
+logs/
+*.log
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+env/
+.venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data files (may contain sensitive info)
+data/*.csv
+data/*.json
+!data/.gitkeep
+
+# OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Playwright
+playwright-report/
+test-results/
+
+# Node (if any)
+node_modules/
+npm-debug.log
+
+# Jupyter
+.ipynb_checkpoints/
