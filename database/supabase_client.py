@@ -93,7 +93,7 @@ def test_connection():
         client = SupabaseClient()
 
         # Try to query the leads table
-        leads = client.select("instagram_leads", columns="count")
+        leads = client.select("agentic_instagram_leads", columns="count")
         print(f"✅ Connected! Tables exist.")
         return True
 
@@ -119,12 +119,12 @@ def get_create_tables_sql():
     """Return SQL to create tables"""
     return """
 -- ============================================
--- Instagram DM Agent Tables
+-- AgenticOS - Instagram DM Agent Tables
 -- Copie e cole no Supabase SQL Editor
 -- ============================================
 
--- Table: instagram_leads
-CREATE TABLE IF NOT EXISTS instagram_leads (
+-- Table: agentic_instagram_leads
+CREATE TABLE IF NOT EXISTS agentic_instagram_leads (
     id BIGSERIAL PRIMARY KEY,
     username VARCHAR(255) NOT NULL UNIQUE,
     full_name VARCHAR(255),
@@ -140,10 +140,10 @@ CREATE TABLE IF NOT EXISTS instagram_leads (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Table: instagram_dm_sent
-CREATE TABLE IF NOT EXISTS instagram_dm_sent (
+-- Table: agentic_instagram_dm_sent
+CREATE TABLE IF NOT EXISTS agentic_instagram_dm_sent (
     id BIGSERIAL PRIMARY KEY,
-    lead_id BIGINT REFERENCES instagram_leads(id),
+    lead_id BIGINT REFERENCES agentic_instagram_leads(id),
     username VARCHAR(255) NOT NULL,
     message_template VARCHAR(100),
     message_sent TEXT NOT NULL,
@@ -153,8 +153,8 @@ CREATE TABLE IF NOT EXISTS instagram_dm_sent (
     account_used VARCHAR(255) NOT NULL
 );
 
--- Table: instagram_dm_agent_runs
-CREATE TABLE IF NOT EXISTS instagram_dm_agent_runs (
+-- Table: agentic_instagram_dm_runs
+CREATE TABLE IF NOT EXISTS agentic_instagram_dm_runs (
     id BIGSERIAL PRIMARY KEY,
     started_at TIMESTAMPTZ DEFAULT NOW(),
     ended_at TIMESTAMPTZ,
@@ -167,8 +167,8 @@ CREATE TABLE IF NOT EXISTS instagram_dm_agent_runs (
     account_used VARCHAR(255) NOT NULL
 );
 
--- Table: instagram_daily_stats
-CREATE TABLE IF NOT EXISTS instagram_daily_stats (
+-- Table: agentic_instagram_daily_stats
+CREATE TABLE IF NOT EXISTS agentic_instagram_daily_stats (
     id BIGSERIAL PRIMARY KEY,
     date DATE NOT NULL,
     account_used VARCHAR(255) NOT NULL,
@@ -180,13 +180,13 @@ CREATE TABLE IF NOT EXISTS instagram_daily_stats (
 );
 
 -- Indexes
-CREATE INDEX IF NOT EXISTS idx_leads_username ON instagram_leads(username);
-CREATE INDEX IF NOT EXISTS idx_dm_sent_username ON instagram_dm_sent(username);
-CREATE INDEX IF NOT EXISTS idx_dm_sent_date ON instagram_dm_sent(sent_at);
-CREATE INDEX IF NOT EXISTS idx_runs_status ON instagram_dm_agent_runs(status);
+CREATE INDEX IF NOT EXISTS idx_agentic_leads_username ON agentic_instagram_leads(username);
+CREATE INDEX IF NOT EXISTS idx_agentic_dm_sent_username ON agentic_instagram_dm_sent(username);
+CREATE INDEX IF NOT EXISTS idx_agentic_dm_sent_date ON agentic_instagram_dm_sent(sent_at);
+CREATE INDEX IF NOT EXISTS idx_agentic_runs_status ON agentic_instagram_dm_runs(status);
 
 -- Sample leads for testing
-INSERT INTO instagram_leads (username, full_name, source) VALUES
+INSERT INTO agentic_instagram_leads (username, full_name, source) VALUES
     ('entrepreneur_daily', 'John Smith', 'sample'),
     ('marketing_tips', 'Sarah Johnson', 'sample'),
     ('startup_founder', 'Mike Chen', 'sample'),
@@ -194,7 +194,7 @@ INSERT INTO instagram_leads (username, full_name, source) VALUES
     ('business_coach', 'David Brown', 'sample')
 ON CONFLICT (username) DO NOTHING;
 
-SELECT 'Tables created successfully!' as status;
+SELECT 'AgenticOS tables created successfully!' as status;
 """
 
 

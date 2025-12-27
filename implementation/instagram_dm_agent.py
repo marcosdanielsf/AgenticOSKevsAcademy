@@ -167,7 +167,7 @@ class SupabaseDB:
 
     def start_run(self, account: str) -> int:
         """Start a new agent run and return run ID"""
-        result = self._request("POST", "instagram_dm_agent_runs", data={
+        result = self._request("POST", "agentic_instagram_dm_runs", data={
             'account_used': account,
             'status': 'running'
         })
@@ -180,7 +180,7 @@ class SupabaseDB:
         if not self.run_id:
             return
 
-        self._request("PATCH", "instagram_dm_agent_runs",
+        self._request("PATCH", "agentic_instagram_dm_runs",
             params={"id": f"eq.{self.run_id}"},
             data={
                 'ended_at': datetime.now().isoformat(),
@@ -196,10 +196,10 @@ class SupabaseDB:
     def get_leads_to_contact(self, limit: int = 200) -> List[Lead]:
         """Get leads that haven't been contacted yet"""
         # Get all leads
-        leads_data = self._request("GET", "instagram_leads", params={"select": "*"})
+        leads_data = self._request("GET", "agentic_instagram_leads", params={"select": "*"})
 
         # Get already contacted usernames
-        contacted_data = self._request("GET", "instagram_dm_sent", params={"select": "username"})
+        contacted_data = self._request("GET", "agentic_instagram_dm_sent", params={"select": "username"})
         contacted_usernames = {r['username'] for r in contacted_data}
 
         # Filter and convert to Lead objects
@@ -222,7 +222,7 @@ class SupabaseDB:
 
     def record_dm_sent(self, result: DMResult, template: str, account: str):
         """Record a sent DM"""
-        self._request("POST", "instagram_dm_sent", data={
+        self._request("POST", "agentic_instagram_dm_sent", data={
             'lead_id': result.lead_id,
             'username': result.username,
             'message_template': template,
@@ -239,7 +239,7 @@ class SupabaseDB:
         headers["Prefer"] = "count=exact"
 
         response = requests.get(
-            f"{self.base_url}/instagram_dm_sent",
+            f"{self.base_url}/agentic_instagram_dm_sent",
             headers=headers,
             params={
                 "select": "*",
@@ -259,7 +259,7 @@ class SupabaseDB:
         headers["Prefer"] = "count=exact"
 
         response = requests.get(
-            f"{self.base_url}/instagram_dm_sent",
+            f"{self.base_url}/agentic_instagram_dm_sent",
             headers=headers,
             params={
                 "select": "*",
@@ -276,7 +276,7 @@ class SupabaseDB:
         today = date.today().isoformat()
 
         # Try to get existing record
-        existing = self._request("GET", "instagram_daily_stats", params={
+        existing = self._request("GET", "agentic_instagram_daily_stats", params={
             "select": "*",
             "date": f"eq.{today}",
             "account_used": f"eq.{account}"
@@ -284,7 +284,7 @@ class SupabaseDB:
 
         if existing:
             # Update existing
-            self._request("PATCH", "instagram_daily_stats",
+            self._request("PATCH", "agentic_instagram_daily_stats",
                 params={"id": f"eq.{existing[0]['id']}"},
                 data={
                     'dms_sent': existing[0]['dms_sent'] + dms_sent,
@@ -293,7 +293,7 @@ class SupabaseDB:
             )
         else:
             # Create new
-            self._request("POST", "instagram_daily_stats", data={
+            self._request("POST", "agentic_instagram_daily_stats", data={
                 'date': today,
                 'account_used': account,
                 'dms_sent': dms_sent,
