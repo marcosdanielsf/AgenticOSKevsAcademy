@@ -29,6 +29,15 @@ from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 from dotenv import load_dotenv
 import requests
 
+# Import scraping and scoring modules
+try:
+    from instagram_profile_scraper import InstagramProfileScraper, InstagramProfile
+    from lead_scorer import LeadScorer, LeadScore, LeadPriority
+    from message_generator import MessageGenerator, GeneratedMessage
+    SMART_MODE_AVAILABLE = True
+except ImportError:
+    SMART_MODE_AVAILABLE = False
+
 # Load environment
 load_dotenv()
 
@@ -321,10 +330,12 @@ class SupabaseDB:
 class InstagramDMAgent:
     """
     Autonomous Instagram DM Agent using Playwright
+    Now with Smart Mode: Profile Scraping + Semantic Scoring + Personalized Messages
     """
 
-    def __init__(self, headless: bool = False):
+    def __init__(self, headless: bool = False, smart_mode: bool = True):
         self.headless = headless
+        self.smart_mode = smart_mode and SMART_MODE_AVAILABLE
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
@@ -333,6 +344,13 @@ class InstagramDMAgent:
         self.dms_sent = 0
         self.dms_failed = 0
         self.dms_skipped = 0
+
+        # Smart mode components
+        if self.smart_mode:
+            self.scraper = None  # Initialized after page is ready
+            self.scorer = LeadScorer()
+            self.message_generator = MessageGenerator()
+            logger.info("🧠 Smart Mode ENABLED: Profile analysis + Semantic scoring")
 
     async def start(self):
         """Initialize browser and load session"""
@@ -373,6 +391,10 @@ class InstagramDMAgent:
         await self.page.set_extra_http_headers({
             'Accept-Language': 'en-US,en;q=0.9',
         })
+
+        # Initialize scraper for smart mode
+        if self.smart_mode:
+            self.scraper = InstagramProfileScraper(self.page)
 
     async def save_session(self):
         """Save browser session for reuse"""
@@ -503,7 +525,7 @@ class InstagramDMAgent:
         return True, f"OK - {min(remaining_today, remaining_hour)} DMs available"
 
     def get_personalized_message(self, lead: Lead, template_id: int = 1) -> str:
-        """Generate personalized message for lead"""
+        """Generate personalized message for lead (fallback method)"""
         template = MESSAGE_TEMPLATES.get(template_id, MESSAGE_TEMPLATES[1])
 
         # Extract interest from bio or use default
@@ -525,6 +547,58 @@ class InstagramDMAgent:
             first_name=lead.first_name,
             interest=interest
         )
+
+    async def analyze_and_generate_message(self, lead: Lead) -> tuple[str, Optional[LeadScore], Optional[InstagramProfile]]:
+        """
+        SMART MODE: Analyze profile, calculate score, and generate personalized message.
+        Returns (message, score, profile) tuple.
+        """
+        if not self.smart_mode:
+            return self.get_personalized_message(lead), None, None
+
+        logger.info(f"🔍 Analyzing profile @{lead.username}...")
+
+        try:
+            # 1. Scrape profile
+            profile = await self.scraper.scrape_profile(lead.username)
+
+            if not profile.scrape_success:
+                logger.warning(f"   Could not scrape @{lead.username}: {profile.error_message}")
+                return self.get_personalized_message(lead), None, None
+
+            logger.info(f"   📊 {profile.followers_count} followers | Bio: {(profile.bio or '')[:50]}...")
+
+            # 2. Calculate score
+            profile_dict = profile.to_dict()
+            score = self.scorer.calculate_score(profile_dict)
+
+            logger.info(f"   🎯 Score: {score.total_score}/100 | Priority: {score.priority.value.upper()}")
+
+            # 3. Check if should send DM
+            if score.priority == LeadPriority.NURTURING:
+                logger.info(f"   ⏭️  Score too low ({score.total_score}), skipping DM")
+                return None, score, profile  # None message = skip this lead
+
+            # 4. Generate personalized message
+            score_dict = {
+                'detected_profession': score.detected_profession,
+                'detected_interests': score.detected_interests,
+                'detected_location': score.detected_location,
+                'total_score': score.total_score,
+                'priority': score.priority.value,
+                'personalization_hooks': score.personalization_hooks
+            }
+
+            generated = self.message_generator.generate(profile_dict, score_dict)
+
+            logger.info(f"   ✨ Generated {generated.personalization_level} personalized message")
+            logger.info(f"   📝 Hooks: {', '.join(generated.hooks_used)}")
+
+            return generated.message, score, profile
+
+        except Exception as e:
+            logger.error(f"   Smart mode error: {e}, falling back to template")
+            return self.get_personalized_message(lead), None, None
 
     async def send_dm(self, lead: Lead, message: str) -> DMResult:
         """Send DM to a single lead"""
@@ -669,13 +743,27 @@ class InstagramDMAgent:
                     logger.warning(f"⚠️  Stopping: {reason}")
                     break
 
-                # Generate and send message
-                message = self.get_personalized_message(lead, template_id)
+                # Generate message (Smart Mode or Template)
+                if self.smart_mode:
+                    message, score, profile = await self.analyze_and_generate_message(lead)
+
+                    # Skip if score too low
+                    if message is None:
+                        self.dms_skipped += 1
+                        logger.info(f"📊 Progress: {i+1}/{len(leads)} | Sent: {self.dms_sent} | Skipped: {self.dms_skipped}")
+                        continue
+
+                    template_name = f"smart_{score.priority.value}" if score else "smart_fallback"
+                else:
+                    message = self.get_personalized_message(lead, template_id)
+                    template_name = f"template_{template_id}"
+
+                # Send DM
                 result = await self.send_dm(lead, message)
 
                 # Record result
                 self.results.append(result)
-                self.db.record_dm_sent(result, f"template_{template_id}", INSTAGRAM_USERNAME)
+                self.db.record_dm_sent(result, template_name, INSTAGRAM_USERNAME)
 
                 if result.success:
                     self.dms_sent += 1
@@ -683,7 +771,7 @@ class InstagramDMAgent:
                     self.dms_failed += 1
 
                 # Progress update
-                logger.info(f"📊 Progress: {i+1}/{len(leads)} | Sent: {self.dms_sent} | Failed: {self.dms_failed}")
+                logger.info(f"📊 Progress: {i+1}/{len(leads)} | Sent: {self.dms_sent} | Failed: {self.dms_failed} | Skipped: {self.dms_skipped}")
 
                 # Random delay between DMs
                 if i < len(leads) - 1:
@@ -707,7 +795,11 @@ class InstagramDMAgent:
         logger.info("📊 CAMPAIGN COMPLETE")
         logger.info(f"   DMs Sent: {self.dms_sent}")
         logger.info(f"   DMs Failed: {self.dms_failed}")
-        logger.info(f"   Success Rate: {(self.dms_sent/(self.dms_sent+self.dms_failed)*100):.1f}%" if (self.dms_sent+self.dms_failed) > 0 else "N/A")
+        logger.info(f"   DMs Skipped: {self.dms_skipped}")
+        if self.smart_mode:
+            logger.info(f"   Mode: 🧠 SMART (Profile Analysis + Semantic Scoring)")
+        total_processed = self.dms_sent + self.dms_failed
+        logger.info(f"   Success Rate: {(self.dms_sent/total_processed*100):.1f}%" if total_processed > 0 else "N/A")
         logger.info("="*60)
 
         # Save session
@@ -731,12 +823,17 @@ class InstagramDMAgent:
 async def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description='Instagram DM Agent')
+    parser = argparse.ArgumentParser(description='Instagram DM Agent with Smart Mode')
     parser.add_argument('--headless', action='store_true', help='Run without browser window')
     parser.add_argument('--login-only', action='store_true', help='Only login and save session')
     parser.add_argument('--limit', type=int, default=200, help='Max DMs to send this run')
     parser.add_argument('--template', type=int, default=1, choices=[1, 2, 3], help='Message template (1-3)')
+    parser.add_argument('--smart', action='store_true', default=True, help='Enable Smart Mode (profile analysis + scoring)')
+    parser.add_argument('--no-smart', action='store_true', help='Disable Smart Mode, use templates only')
     args = parser.parse_args()
+
+    # Determine smart mode
+    smart_mode = args.smart and not args.no_smart
 
     # Validate configuration
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -747,7 +844,7 @@ async def main():
         logger.error("❌ Instagram not configured! Set INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD")
         return
 
-    agent = InstagramDMAgent(headless=args.headless)
+    agent = InstagramDMAgent(headless=args.headless, smart_mode=smart_mode)
 
     try:
         await agent.start()
