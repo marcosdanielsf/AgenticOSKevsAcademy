@@ -311,10 +311,14 @@ class PostLikersScraper:
 
         leads_to_insert = []
         for liker in likers:
+            # Filtrar usernames inválidos
+            username = liker['username']
+            if username in ['reels', 'explore', 'direct', 'stories', 'marcosdanielsf']:
+                continue
             leads_to_insert.append({
-                'username': liker['username'],
+                'username': username,
                 'source': liker['source'],
-                'notes': f"Curtiu post: {liker.get('source_url', 'N/A')}"
+                'full_name': username  # Será atualizado pelo Smart Mode depois
             })
 
         inserted = self.db.insert_leads(leads_to_insert)
