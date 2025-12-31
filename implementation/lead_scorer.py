@@ -295,6 +295,8 @@ class LeadScorer:
 
     def _detect_interests(self, bio: str) -> List[str]:
         """Detecta interesses do perfil"""
+        if not bio:
+            return []
         interests = []
         bio_lower = bio.lower()
 
@@ -308,6 +310,8 @@ class LeadScorer:
 
     def _detect_location(self, bio: str) -> Optional[str]:
         """Detecta localização do perfil"""
+        if not bio:
+            return None
         bio_lower = bio.lower()
 
         for location in self.HIGH_VALUE_LOCATIONS:
