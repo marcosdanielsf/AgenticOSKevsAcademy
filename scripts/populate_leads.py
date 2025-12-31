@@ -22,68 +22,43 @@ headers = {
     "Prefer": "return=representation"
 }
 
-# Leads de demonstração - profissionais de saúde (exemplo)
-# Estrutura conforme tabela agentic_instagram_leads
+# Leads de teste - usernames reais
 demo_leads = [
     {
-        "username": "dr.exemplo1",
-        "full_name": "Dr. João Silva",
-        "bio": "Médico | Especialista em Cardiologia | Consultório em SP",
-        "followers_count": 5420,
-        "following_count": 890,
-        "is_private": False,
-        "is_verified": False,
-        "profile_url": "https://instagram.com/dr.exemplo1",
-        "source": "demo",
-        "tags": ["médico", "cardiologia", "saúde"]
+        "username": "mottivme",
+        "full_name": "Mottiv Me",
+        "profile_url": "https://instagram.com/mottivme",
+        "source": "test",
     },
     {
-        "username": "dra.exemplo2",
-        "full_name": "Dra. Maria Santos",
-        "bio": "Dermatologista | Estética | Clínica própria | RJ",
-        "followers_count": 12300,
-        "following_count": 456,
-        "is_private": False,
-        "is_verified": True,
-        "profile_url": "https://instagram.com/dra.exemplo2",
-        "source": "demo",
-        "tags": ["médica", "dermatologia", "estética"]
+        "username": "socialfyselling",
+        "full_name": "Socialfy Selling",
+        "profile_url": "https://instagram.com/socialfyselling",
+        "source": "test",
     },
     {
-        "username": "fisio.exemplo3",
-        "full_name": "Carlos Oliveira",
-        "bio": "Fisioterapeuta | Pilates | Reabilitação | Atendimento domiciliar",
-        "followers_count": 3200,
-        "following_count": 1200,
-        "is_private": False,
-        "is_verified": False,
-        "profile_url": "https://instagram.com/fisio.exemplo3",
-        "source": "demo",
-        "tags": ["fisioterapia", "pilates", "saúde"]
+        "username": "hallennaiane",
+        "full_name": "Hallen Naiane",
+        "profile_url": "https://instagram.com/hallennaiane",
+        "source": "test",
     },
     {
-        "username": "nutri.exemplo4",
-        "full_name": "Ana Paula Costa",
-        "bio": "Nutricionista | Emagrecimento | Reeducação alimentar | Online",
-        "followers_count": 8900,
-        "following_count": 670,
-        "is_private": False,
-        "is_verified": False,
-        "profile_url": "https://instagram.com/nutri.exemplo4",
-        "source": "demo",
-        "tags": ["nutrição", "emagrecimento", "saúde"]
+        "username": "eusoumarcos",
+        "full_name": "Marcos",
+        "profile_url": "https://instagram.com/eusoumarcos",
+        "source": "test",
     },
     {
-        "username": "psicologo.exemplo5",
-        "full_name": "Dr. Pedro Mendes",
-        "bio": "Psicólogo Clínico | Terapia Cognitiva | Atendimento online",
-        "followers_count": 6700,
-        "following_count": 340,
-        "is_private": False,
-        "is_verified": False,
-        "profile_url": "https://instagram.com/psicologo.exemplo5",
-        "source": "demo",
-        "tags": ["psicologia", "terapia", "saúde mental"]
+        "username": "andrerosafc",
+        "full_name": "Andre Rosa",
+        "profile_url": "https://instagram.com/andrerosafc",
+        "source": "test",
+    },
+    {
+        "username": "gladinjr",
+        "full_name": "Gladin Jr",
+        "profile_url": "https://instagram.com/gladinjr",
+        "source": "test",
     }
 ]
 
