@@ -11,23 +11,41 @@ Responsibilities:
 - Monitor system health
 - Handle failover and recovery
 
-Architecture:
-├── OUTBOUND SQUAD (Active Lead Hunt)
+Architecture (6 Squads, 23 Agents):
+├── OUTBOUND SQUAD (Active Lead Hunt) - 5 agents
 │   ├── Lead Discovery Agent
 │   ├── Profile Analyzer Agent
 │   ├── Lead Qualifier Agent
 │   ├── Message Composer Agent
 │   └── Outreach Executor Agent
 │
-├── INBOUND SQUAD (Lead Comes to Us)
+├── INBOUND SQUAD (Lead Comes to Us) - 3 agents
 │   ├── Inbox Monitor Agent
 │   ├── Lead Classifier Agent
 │   └── Auto Responder Agent
 │
-└── INFRASTRUCTURE SQUAD (Support)
-    ├── Account Manager Agent
-    ├── Analytics Agent
-    └── Error Handler Agent
+├── INFRASTRUCTURE SQUAD (Support) - 3 agents
+│   ├── Account Manager Agent
+│   ├── Analytics Agent
+│   └── Error Handler Agent
+│
+├── SECURITY SQUAD (Protection) - 4 agents
+│   ├── Rate Limit Guard Agent
+│   ├── Session Security Agent
+│   ├── Anti-Detection Agent
+│   └── Compliance Agent
+│
+├── PERFORMANCE SQUAD (Optimization) - 4 agents
+│   ├── Cache Manager Agent
+│   ├── Batch Processor Agent
+│   ├── Queue Manager Agent
+│   └── Load Balancer Agent
+│
+└── QUALITY SQUAD (Quality Assurance) - 4 agents
+    ├── Data Validator Agent
+    ├── Message Quality Agent
+    ├── Deduplication Agent
+    └── Audit Logger Agent
 """
 
 import asyncio
@@ -66,10 +84,13 @@ class OrchestratorAgent(BaseAgent):
     Routes tasks, manages workflows, and ensures system reliability.
     """
 
-    # Squad definitions
+    # Squad definitions (6 squads, 23 agents)
     SQUAD_OUTBOUND = "outbound"
     SQUAD_INBOUND = "inbound"
     SQUAD_INFRASTRUCTURE = "infrastructure"
+    SQUAD_SECURITY = "security"
+    SQUAD_PERFORMANCE = "performance"
+    SQUAD_QUALITY = "quality"
 
     def __init__(self, config: Dict = None):
         super().__init__(
@@ -80,11 +101,14 @@ class OrchestratorAgent(BaseAgent):
 
         self.config = config or {}
 
-        # Agent registry by squad
+        # Agent registry by squad (6 squads)
         self.squads: Dict[str, Dict[str, BaseAgent]] = {
             self.SQUAD_OUTBOUND: {},
             self.SQUAD_INBOUND: {},
-            self.SQUAD_INFRASTRUCTURE: {}
+            self.SQUAD_INFRASTRUCTURE: {},
+            self.SQUAD_SECURITY: {},
+            self.SQUAD_PERFORMANCE: {},
+            self.SQUAD_QUALITY: {}
         }
 
         # Task routing table
