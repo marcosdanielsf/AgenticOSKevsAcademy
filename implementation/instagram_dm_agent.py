@@ -31,12 +31,23 @@ import requests
 
 # Import scraping and scoring modules
 try:
-    from instagram_profile_scraper import InstagramProfileScraper, InstagramProfile
+    # Use Vision-based scraper (screenshot + AI) - more robust than CSS selectors
+    from instagram_profile_scraper_vision import InstagramProfileScraperVision, InstagramProfile
     from lead_scorer import LeadScorer, LeadScore, LeadPriority
     from message_generator import MessageGenerator, GeneratedMessage
     SMART_MODE_AVAILABLE = True
+    VISION_SCRAPER = True
 except ImportError:
-    SMART_MODE_AVAILABLE = False
+    try:
+        # Fallback to regular scraper
+        from instagram_profile_scraper import InstagramProfileScraper as InstagramProfileScraperVision, InstagramProfile
+        from lead_scorer import LeadScorer, LeadScore, LeadPriority
+        from message_generator import MessageGenerator, GeneratedMessage
+        SMART_MODE_AVAILABLE = True
+        VISION_SCRAPER = False
+    except ImportError:
+        SMART_MODE_AVAILABLE = False
+        VISION_SCRAPER = False
 
 # Load environment
 load_dotenv()
@@ -350,7 +361,10 @@ class InstagramDMAgent:
             self.scraper = None  # Initialized after page is ready
             self.scorer = LeadScorer()
             self.message_generator = MessageGenerator()
-            logger.info("🧠 Smart Mode ENABLED: Profile analysis + Semantic scoring")
+            if VISION_SCRAPER:
+                logger.info("🧠 Smart Mode ENABLED: Screenshot + AI Vision extraction")
+            else:
+                logger.info("🧠 Smart Mode ENABLED: Meta tags extraction (fallback)")
 
     async def start(self):
         """Initialize browser and load session"""
@@ -394,7 +408,7 @@ class InstagramDMAgent:
 
         # Initialize scraper for smart mode
         if self.smart_mode:
-            self.scraper = InstagramProfileScraper(self.page)
+            self.scraper = InstagramProfileScraperVision(self.page)
 
     async def save_session(self):
         """Save browser session for reuse"""
@@ -567,7 +581,8 @@ class InstagramDMAgent:
                 logger.warning(f"   Could not scrape @{lead.username}: {profile.error_message}")
                 return self.get_personalized_message(lead), None, None
 
-            logger.info(f"   📊 {profile.followers_count} followers | Bio: {(profile.bio or '')[:50]}...")
+            extraction_mode = getattr(profile, 'extraction_method', 'unknown')
+            logger.info(f"   📊 {profile.followers_count} followers | Bio: {(profile.bio or '')[:50]}... [{extraction_mode}]")
 
             # 2. Calculate score
             profile_dict = profile.to_dict()
