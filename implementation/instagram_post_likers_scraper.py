@@ -138,15 +138,34 @@ class PostLikersScraper:
     async def verify_login(self) -> bool:
         """Verifica se está logado"""
         await self.page.goto('https://www.instagram.com/', wait_until='domcontentloaded', timeout=30000)
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
 
-        try:
-            await self.page.wait_for_selector('svg[aria-label="Home"]', timeout=5000)
-            logger.info("✅ Logado no Instagram")
+        # Verificar múltiplos indicadores de login
+        login_indicators = [
+            'svg[aria-label="Home"]',
+            'svg[aria-label="Página inicial"]',
+            'svg[aria-label="Inicio"]',
+            'a[href="/direct/inbox/"]',
+            'span:has-text("Pesquisa")',
+            'span:has-text("Search")',
+        ]
+
+        for selector in login_indicators:
+            try:
+                await self.page.wait_for_selector(selector, timeout=2000)
+                logger.info("✅ Logado no Instagram")
+                return True
+            except:
+                continue
+
+        # Verificar se NÃO está na página de login
+        current_url = self.page.url
+        if 'login' not in current_url and 'accounts' not in current_url:
+            logger.info("✅ Logado no Instagram (verificação por URL)")
             return True
-        except:
-            logger.error("❌ Não está logado! Execute primeiro: python instagram_dm_agent.py --login-only")
-            return False
+
+        logger.error("❌ Não está logado! Execute primeiro: python instagram_dm_agent.py --login-only")
+        return False
 
     async def scrape_likers(self, post_url: str, limit: int = 200) -> List[Dict]:
         """
@@ -227,7 +246,7 @@ class PostLikersScraper:
 
             while len(likers) < limit and no_new_count < 5:
                 # Capturar usernames visíveis
-                usernames = await self.page.evaluate('''() => {
+                usernames = await self.page.evaluate(r'''() => {
                     const links = document.querySelectorAll('a[href^="/"]');
                     const usernames = [];
                     links.forEach(link => {
