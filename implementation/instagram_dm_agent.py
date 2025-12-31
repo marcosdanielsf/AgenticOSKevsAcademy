@@ -107,6 +107,19 @@ class DMResult:
 # MESSAGE TEMPLATES
 # ============================================
 
+# Import advanced templates
+try:
+    import sys
+    sys.path.insert(0, str(BASE_DIR / "config"))
+    from dm_templates import (
+        get_template, render_message, extract_first_name,
+        FIRST_CONTACT_TEMPLATES
+    )
+    ADVANCED_TEMPLATES = True
+except ImportError:
+    ADVANCED_TEMPLATES = False
+
+# Fallback templates
 MESSAGE_TEMPLATES = {
     1: """Hey {first_name}! 👋
 
