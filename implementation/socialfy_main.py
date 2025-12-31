@@ -88,37 +88,47 @@ BANNER = """
 # ============================================
 
 def create_all_squads(config: Dict = None) -> Dict:
-    """Create all agent squads"""
+    """Create all agent squads (6 squads, 23 agents)"""
     from agents.outbound_squad import create_outbound_squad
     from agents.inbound_squad import create_inbound_squad
     from agents.infrastructure_squad import create_infrastructure_squad
+    from agents.security_squad import create_security_squad
+    from agents.performance_squad import create_performance_squad
+    from agents.quality_squad import create_quality_squad
 
     config = config or {}
 
     return {
         "outbound": create_outbound_squad(config.get("outbound")),
         "inbound": create_inbound_squad(config.get("inbound")),
-        "infrastructure": create_infrastructure_squad(config.get("infrastructure"))
+        "infrastructure": create_infrastructure_squad(config.get("infrastructure")),
+        "security": create_security_squad(config.get("security")),
+        "performance": create_performance_squad(config.get("performance")),
+        "quality": create_quality_squad(config.get("quality")),
     }
 
 
 async def initialize_orchestrator(config: Dict = None) -> 'OrchestratorAgent':
-    """Initialize the orchestrator with all squads"""
+    """Initialize the orchestrator with all 6 squads (23 agents)"""
     from agents.orchestrator import OrchestratorAgent
 
-    logger.info("Initializing Orchestrator...")
+    logger.info("Initializing Orchestrator with 6 squads...")
 
     orchestrator = OrchestratorAgent(config)
 
     # Create and register all squads
     squads = create_all_squads(config)
 
+    total_agents = 0
     for squad_name, agents in squads.items():
         for agent_name, agent in agents.items():
             orchestrator.register_agent(agent, squad_name)
+            total_agents += 1
 
     # Initialize
     await orchestrator.initialize()
+
+    logger.info(f"Orchestrator ready with {total_agents} agents across {len(squads)} squads")
 
     return orchestrator
 

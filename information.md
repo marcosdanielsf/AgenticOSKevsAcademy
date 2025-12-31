@@ -1,7 +1,7 @@
 # INFORMATION.MD - Source of Truth
 
 > Framework "ii" - Este arquivo contém SOPs, Context, Goals, e Constraints Aprendidas.
-> Última atualização: 2025-12-31
+> Última atualização: 2025-12-31 (v2.0 - 23 Agentes)
 
 ---
 
@@ -9,25 +9,28 @@
 
 ### Socialfy - Lead Generation & DM Automation System
 
-Sistema multi-agente para geração de leads e automação de DMs no Instagram.
+Sistema multi-agente de nível **UNICÓRNIO** para geração de leads e automação de DMs no Instagram.
 
 **Arquitetura:**
-- 11 agentes especializados em 3 squads
+- **23 agentes especializados em 6 squads**
+- Orchestrator central (Maestro)
 - API Server (FastAPI) para integração com n8n
-- Supabase como banco de dados (REST API)
+- Supabase como banco de dados (REST API + RLS multi-tenant)
 - Gemini Vision para análise de perfis (GRATUITO)
+- Multi-tenant com versionamento de personas
 
 ---
 
-## 2. ARQUITETURA DE AGENTES
+## 2. ARQUITETURA DE AGENTES (23 AGENTES)
 
 ### 2.1 Orchestrator (Maestro)
-- Coordena todos os sub-agentes
+- Coordena todos os 23 sub-agentes
 - Roteia tasks por tipo
 - Executa workflows multi-step
 - Monitora saúde do sistema
+- Failover automático
 
-### 2.2 OUTBOUND SQUAD (Busca Ativa)
+### 2.2 OUTBOUND SQUAD (Busca Ativa) - 5 Agentes
 
 | Agente | Responsabilidade | Task Types |
 |--------|------------------|------------|
@@ -37,7 +40,7 @@ Sistema multi-agente para geração de leads e automação de DMs no Instagram.
 | MessageComposerAgent | Criar mensagens personalizadas | compose_message, generate_hook |
 | OutreachExecutorAgent | Enviar DMs com comportamento humano | send_dm, check_limits |
 
-### 2.3 INBOUND SQUAD (Lead nos Aborda)
+### 2.3 INBOUND SQUAD (Lead nos Aborda) - 3 Agentes
 
 | Agente | Responsabilidade | Task Types |
 |--------|------------------|------------|
@@ -45,13 +48,40 @@ Sistema multi-agente para geração de leads e automação de DMs no Instagram.
 | LeadClassifierAgent | Classificar leads com AI | classify_lead, check_whitelist |
 | AutoResponderAgent | Gerar e enviar respostas contextuais | generate_response, send_response |
 
-### 2.4 INFRASTRUCTURE SQUAD (Suporte)
+### 2.4 INFRASTRUCTURE SQUAD (Suporte) - 3 Agentes
 
 | Agente | Responsabilidade | Task Types |
 |--------|------------------|------------|
 | AccountManagerAgent | Gerenciar contas, sessões, rotação | load_session, rotate_account |
 | AnalyticsAgent | Coletar métricas e reports | get_daily_stats, track_event |
 | ErrorHandlerAgent | Recovery, retry, alertas | handle_error, check_alerts |
+
+### 2.5 SECURITY SQUAD (Segurança) - 4 Agentes
+
+| Agente | Responsabilidade | Task Types |
+|--------|------------------|------------|
+| RateLimitGuardAgent | Proteção contra rate limiting | check_can_perform, consume_quota, report_warning |
+| SessionSecurityAgent | Validação e refresh de sessão | validate_session, check_login_state |
+| AntiDetectionAgent | Evitar detecção de bot | get_random_delay, simulate_human_typing |
+| ComplianceAgent | GDPR/LGPD compliance | check_can_contact, record_opt_out |
+
+### 2.6 PERFORMANCE SQUAD (Performance) - 4 Agentes
+
+| Agente | Responsabilidade | Task Types |
+|--------|------------------|------------|
+| CacheManagerAgent | Cache de perfis e dados | cache_get, cache_set, cache_stats |
+| BatchProcessorAgent | Processamento em lote | create_batch, process_batch, get_batch_status |
+| QueueManagerAgent | Filas de prioridade | queue_push, queue_pop, queue_stats |
+| LoadBalancerAgent | Distribuição de carga entre contas | get_next_account, report_health, rebalance |
+
+### 2.7 QUALITY SQUAD (Qualidade) - 4 Agentes
+
+| Agente | Responsabilidade | Task Types |
+|--------|------------------|------------|
+| DataValidatorAgent | Validação de dados | validate_username, validate_profile, detect_bot |
+| MessageQualityAgent | Qualidade de mensagens | validate_message, check_personalization, analyze_tone |
+| DeduplicationAgent | Prevenção de duplicatas | check_duplicate_lead, check_can_contact, mark_contacted |
+| AuditLoggerAgent | Logging de auditoria | log_action, log_error, get_summary, export_logs |
 
 ---
 
