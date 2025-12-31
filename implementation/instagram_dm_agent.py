@@ -31,23 +31,26 @@ import requests
 
 # Import scraping and scoring modules
 try:
-    # Use Vision-based scraper (screenshot + AI) - more robust than CSS selectors
-    from instagram_profile_scraper_vision import InstagramProfileScraperVision, InstagramProfile
+    # Use Gemini Vision scraper (screenshot + AI) - FREE with Gemini 1.5 Flash!
+    from instagram_profile_scraper_gemini import InstagramProfileScraperGemini as InstagramProfileScraperVision, InstagramProfile
     from lead_scorer import LeadScorer, LeadScore, LeadPriority
     from message_generator import MessageGenerator, GeneratedMessage
     SMART_MODE_AVAILABLE = True
     VISION_SCRAPER = True
+    VISION_MODEL = "gemini"
 except ImportError:
     try:
-        # Fallback to regular scraper
+        # Fallback to regular scraper (meta tags)
         from instagram_profile_scraper import InstagramProfileScraper as InstagramProfileScraperVision, InstagramProfile
         from lead_scorer import LeadScorer, LeadScore, LeadPriority
         from message_generator import MessageGenerator, GeneratedMessage
         SMART_MODE_AVAILABLE = True
         VISION_SCRAPER = False
+        VISION_MODEL = "none"
     except ImportError:
         SMART_MODE_AVAILABLE = False
         VISION_SCRAPER = False
+        VISION_MODEL = "none"
 
 # Load environment
 load_dotenv()
@@ -361,8 +364,10 @@ class InstagramDMAgent:
             self.scraper = None  # Initialized after page is ready
             self.scorer = LeadScorer()
             self.message_generator = MessageGenerator()
-            if VISION_SCRAPER:
-                logger.info("🧠 Smart Mode ENABLED: Screenshot + AI Vision extraction")
+            if VISION_SCRAPER and VISION_MODEL == "gemini":
+                logger.info("🧠 Smart Mode ENABLED: Gemini Vision (FREE)")
+            elif VISION_SCRAPER:
+                logger.info("🧠 Smart Mode ENABLED: Screenshot + AI Vision")
             else:
                 logger.info("🧠 Smart Mode ENABLED: Meta tags extraction (fallback)")
 
