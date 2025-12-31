@@ -24,42 +24,12 @@ headers = {
 
 # Leads de teste - usernames reais
 demo_leads = [
-    {
-        "username": "mottivme",
-        "full_name": "Mottiv Me",
-        "profile_url": "https://instagram.com/mottivme",
-        "source": "test",
-    },
-    {
-        "username": "socialfyselling",
-        "full_name": "Socialfy Selling",
-        "profile_url": "https://instagram.com/socialfyselling",
-        "source": "test",
-    },
-    {
-        "username": "hallennaiane",
-        "full_name": "Hallen Naiane",
-        "profile_url": "https://instagram.com/hallennaiane",
-        "source": "test",
-    },
-    {
-        "username": "eusoumarcos",
-        "full_name": "Marcos",
-        "profile_url": "https://instagram.com/eusoumarcos",
-        "source": "test",
-    },
-    {
-        "username": "andrerosafc",
-        "full_name": "Andre Rosa",
-        "profile_url": "https://instagram.com/andrerosafc",
-        "source": "test",
-    },
-    {
-        "username": "gladinjr",
-        "full_name": "Gladin Jr",
-        "profile_url": "https://instagram.com/gladinjr",
-        "source": "test",
-    }
+    {"username": "mottivme", "full_name": "Mottiv Me", "source": "test"},
+    {"username": "socialfyselling", "full_name": "Socialfy Selling", "source": "test"},
+    {"username": "hallennaiane", "full_name": "Hallen Naiane", "source": "test"},
+    {"username": "eusoumarcos", "full_name": "Marcos", "source": "test"},
+    {"username": "andrerosafc", "full_name": "Andre Rosa", "source": "test"},
+    {"username": "gladinjr", "full_name": "Gladin Jr", "source": "test"},
 ]
 
 
