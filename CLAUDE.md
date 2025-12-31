@@ -124,6 +124,34 @@ python3 implementation/instantly_push.py
 python3 implementation/instantly_create_campaign.py
 ```
 
+#### Instagram Followers Management
+
+```bash
+# Download all followers from an Instagram profile
+python3 implementation/instagram_followers_downloader.py
+
+# Export Instagram followers directly to Google Sheets
+python3 implementation/instagram_to_sheets.py
+
+# Quick example script
+python3 implementation/quick_instagram_example.py
+```
+
+**Features:**
+- Download complete follower list with detailed information
+- Export to CSV, JSON, or TXT formats
+- Direct export to Google Sheets
+- Session management (no need to login every time)
+- Automatic rate limiting to avoid blocks
+- Detailed logging
+
+**Requirements:**
+```bash
+pip install -r implementation/instagram_requirements.txt
+```
+
+**Documentation:** See `implementation/README_INSTAGRAM.md` for complete guide
+
 #### Automation and Scheduling
 
 ```bash
