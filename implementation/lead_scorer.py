@@ -242,7 +242,7 @@ class LeadScorer:
             points += 5
 
         # Perfil parece ativo - 5 pts
-        posting_frequency = profile.get('posting_frequency', '')
+        posting_frequency = profile.get('posting_frequency') or ''
         if 'muito ativo' in posting_frequency or 'ativo' in posting_frequency:
             points += 5
 
