@@ -417,7 +417,8 @@ class InstagramDMAgent:
         logger.info("🔐 Logging into Instagram...")
 
         try:
-            await self.page.goto('https://www.instagram.com/', wait_until='networkidle')
+            # Use domcontentloaded instead of networkidle (Instagram never stops loading)
+            await self.page.goto('https://www.instagram.com/', wait_until='domcontentloaded', timeout=60000)
             await asyncio.sleep(3)
 
             # Check if already logged in
@@ -433,7 +434,7 @@ class InstagramDMAgent:
                     pass
 
             # Navigate to login page
-            await self.page.goto('https://www.instagram.com/accounts/login/', wait_until='networkidle')
+            await self.page.goto('https://www.instagram.com/accounts/login/', wait_until='domcontentloaded', timeout=60000)
             await asyncio.sleep(2)
 
             # Accept cookies if prompted
@@ -606,7 +607,7 @@ class InstagramDMAgent:
 
         try:
             # Go to Instagram Direct
-            await self.page.goto('https://www.instagram.com/direct/inbox/', wait_until='networkidle')
+            await self.page.goto('https://www.instagram.com/direct/inbox/', wait_until='domcontentloaded', timeout=60000)
             await asyncio.sleep(2)
 
             # Click "New Message" / "Send message" button

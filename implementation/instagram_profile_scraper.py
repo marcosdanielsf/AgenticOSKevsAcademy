@@ -76,7 +76,7 @@ class InstagramProfileScraper:
         try:
             # Navegar para o perfil
             url = f"https://www.instagram.com/{username}/"
-            await self.page.goto(url, wait_until='networkidle')
+            await self.page.goto(url, wait_until='domcontentloaded', timeout=60000)
             await asyncio.sleep(2)
 
             # Verificar se perfil existe
