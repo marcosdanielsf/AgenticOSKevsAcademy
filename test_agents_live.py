@@ -256,7 +256,7 @@ def test_integration_save():
             profile_data={
                 "company": "Empresa Teste",
                 "phone": "+5511999999999",
-                "status": "cold",  # Valid values: hot, warm, cold (not "new")
+                "status": "hot",  # Using existing lead's status
                 "score": 50
             }
         )
