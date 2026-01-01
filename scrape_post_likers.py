@@ -301,19 +301,10 @@ async def save_to_supabase(likers: list, enrich: bool = False, page=None):
                 else:
                     status = "pending"
 
-        # Build Instagram profile URL and notes
-        instagram_url = f"https://instagram.com/{username}"
-        bio = profile_data.get("biography") or profile_data.get("bio") or ""
-        notes_parts = [f"Instagram: {instagram_url}"]
-        if bio:
-            notes_parts.append(f"Bio: {bio}")
-        notes = "\n".join(notes_parts)
-
         # Preparar dados para salvar
         lead_data = {
             "name": profile_data.get("full_name") or username,
             "source_channel": "instagram_like",  # Específico: veio de curtida
-            "notes": notes,
             "status": status,
             "score": score,
             "created_at": datetime.now().isoformat()

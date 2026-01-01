@@ -277,17 +277,6 @@ class SocialfyAgentIntegration:
         """
         profile_data = profile_data or {}
 
-        # Build notes with Instagram URL and bio if available
-        notes_parts = []
-        full_profile = profile_data.get('full_profile', {})
-        username = full_profile.get('username', '')
-        if username:
-            notes_parts.append(f"Instagram: https://instagram.com/{username}")
-        bio = full_profile.get('biography') or full_profile.get('bio', '')
-        if bio:
-            notes_parts.append(f"Bio: {bio}")
-        notes = "\n".join(notes_parts) if notes_parts else None
-
         # Calculate status from score (valid: pending, viewed, engaged, hot, won, lost)
         score = profile_data.get('score', 0)
         if score >= 70:
@@ -302,7 +291,6 @@ class SocialfyAgentIntegration:
             'email': email,
             'phone': profile_data.get('phone'),
             'company': profile_data.get('company'),
-            'notes': notes,
             'source_channel': source,  # instagram_dm, instagram_like, instagram_comment, etc.
             'status': status,
             'score': score,
@@ -348,19 +336,6 @@ class SocialfyAgentIntegration:
         else:
             status = 'pending'
 
-        # Build Instagram profile URL
-        username = instagram_data.get('username', '')
-        instagram_url = f"https://instagram.com/{username}" if username else None
-
-        # Combine bio with Instagram URL in notes
-        bio = instagram_data.get('biography') or instagram_data.get('bio') or ''
-        notes_parts = []
-        if instagram_url:
-            notes_parts.append(f"Instagram: {instagram_url}")
-        if bio:
-            notes_parts.append(f"Bio: {bio}")
-        notes = "\n".join(notes_parts) if notes_parts else None
-
         # Determine specific source channel
         # Options: instagram_dm, instagram_like, instagram_comment, instagram_follower
         source_type = instagram_data.get('source_type', 'dm')
@@ -371,7 +346,6 @@ class SocialfyAgentIntegration:
             'email': instagram_data.get('email'),
             'phone': instagram_data.get('phone'),
             'company': instagram_data.get('company'),
-            'notes': notes,
             'source_channel': source_channel,
             'status': status,
             'score': score,

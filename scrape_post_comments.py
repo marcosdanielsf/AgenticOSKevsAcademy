@@ -279,23 +279,10 @@ async def save_to_supabase(commenters: list, enrich: bool = False):
                 else:
                     status = "pending"
 
-        # Build Instagram profile URL and notes
-        instagram_url = f"https://instagram.com/{username}"
-        bio = profile_data.get("biography") or profile_data.get("bio") or ""
-        comment_preview = commenter.get("comment_preview", "")
-
-        notes_parts = [f"Instagram: {instagram_url}"]
-        if bio:
-            notes_parts.append(f"Bio: {bio}")
-        if comment_preview:
-            notes_parts.append(f"Comentário: {comment_preview[:50]}...")
-        notes = "\n".join(notes_parts)
-
         # Preparar dados para salvar
         lead_data = {
             "name": profile_data.get("full_name") or username,
             "source_channel": "instagram_comment",  # Específico: veio de comentário
-            "notes": notes,
             "status": status,
             "score": score,
             "created_at": datetime.now().isoformat()
