@@ -327,6 +327,7 @@ class SocialfyAgentIntegration:
             'email': instagram_data.get('email'),
             'phone': instagram_data.get('phone'),
             'company': instagram_data.get('company'),
+            'notes': instagram_data.get('biography') or instagram_data.get('bio'),  # Bio do Instagram
             'source_channel': 'instagram',
             'status': status,
             'score': score,
