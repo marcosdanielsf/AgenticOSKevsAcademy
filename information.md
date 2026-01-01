@@ -239,6 +239,17 @@ git pull --rebase
 git stash pop
 ```
 
+### 6.6 Railway Build - Built-in Modules
+**PROBLEMA**: Railway falha ao instalar módulos built-in do Python 3
+```
+❌ concurrent.futures, asyncio, asyncio-compat
+ERROR: No matching distribution found for concurrent.futures
+```
+**SOLUÇÃO**: Não incluir no requirements.txt:
+- `concurrent.futures` (built-in Python 3.2+)
+- `asyncio` (built-in Python 3.4+)
+- `asyncio-compat` (desnecessário, pode puxar concurrent.futures)
+
 ---
 
 ## 7. BEST PRACTICES
