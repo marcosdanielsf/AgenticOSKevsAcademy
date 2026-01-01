@@ -53,15 +53,16 @@ def test_fetch_leads(client):
     if isinstance(result, list):
         print(f"✅ {len(result)} leads encontrados:\n")
         for i, lead in enumerate(result, 1):
-            username = lead.get('username', 'N/A')
-            full_name = lead.get('full_name', '')
+            name = lead.get('name', 'N/A')
+            email = lead.get('email', 'N/A')
+            company = lead.get('company', '')
             status = lead.get('status', 'N/A')
             source = lead.get('source_channel', 'N/A')
-            icp_score = lead.get('icp_score', '-')
+            score = lead.get('score', '-')
 
-            print(f"  {i}. @{username}")
-            print(f"     Nome: {full_name}")
-            print(f"     Status: {status} | Fonte: {source} | ICP: {icp_score}")
+            print(f"  {i}. {name}")
+            print(f"     Email: {email}")
+            print(f"     Empresa: {company} | Status: {status} | Score: {score}")
             print()
         return result
     else:
@@ -239,28 +240,32 @@ def test_integration_save():
     try:
         integration = SocialfyAgentIntegration()
 
-        # Criar lead de teste
-        test_lead = {
-            "full_name": "Teste API " + datetime.now().strftime("%H:%M:%S"),
-            "bio": "Lead criado via teste automatizado",
-            "followers_count": 1000,
-            "following_count": 500,
-            "is_business": True,
-            "external_url": None,
-            "profile_pic_url": None
-        }
+        # Criar lead de teste com campos corretos
+        timestamp = datetime.now().strftime("%H%M%S")
+        test_name = f"Teste API {timestamp}"
+        test_email = f"teste_{timestamp}@test.com"
 
         print(f"📝 Salvando lead de teste...")
+        print(f"   Nome: {test_name}")
+        print(f"   Email: {test_email}")
 
         result = integration.save_discovered_lead(
-            username=f"teste_{datetime.now().strftime('%H%M%S')}",
+            name=test_name,
+            email=test_email,
             source="test_script",
-            profile_data=test_lead
+            profile_data={
+                "company": "Empresa Teste",
+                "phone": "+5511999999999",
+                "status": "new",
+                "score": 50
+            }
         )
 
-        if 'error' not in result:
+        if isinstance(result, list) and result:
             print(f"✅ Lead salvo com sucesso!")
-            print(f"   ID: {result[0].get('id', 'N/A') if isinstance(result, list) else 'N/A'}")
+            print(f"   ID: {result[0].get('id', 'N/A')}")
+        elif 'error' not in result:
+            print(f"✅ Lead salvo: {result}")
         else:
             print(f"⚠️ Resposta: {result}")
 

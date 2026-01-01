@@ -82,13 +82,21 @@ class SupabaseClient:
         headers = {**self.headers, 'Prefer': 'resolution=merge-duplicates,return=representation'}
         return self._request('POST', 'crm_leads', data=lead_data)
 
-    def get_lead_by_username(self, username: str) -> Optional[Dict]:
-        """Get a lead by Instagram/LinkedIn username"""
+    def get_lead_by_email(self, email: str) -> Optional[Dict]:
+        """Get a lead by email"""
         result = self._request('GET', 'crm_leads', params={
-            'username': f'eq.{username}',
+            'email': f'eq.{email}',
             'limit': 1
         })
         return result[0] if isinstance(result, list) and result else None
+
+    def get_lead_by_name(self, name: str) -> Optional[Dict]:
+        """Get a lead by name (partial match)"""
+        result = self._request('GET', 'crm_leads', params={
+            'name': f'ilike.%{name}%',
+            'limit': 5
+        })
+        return result if isinstance(result, list) else []
 
     def update_lead(self, lead_id: str, updates: Dict) -> Dict:
         """Update a lead by ID"""
@@ -255,22 +263,29 @@ class SocialfyAgentIntegration:
         logger.info("SocialfyAgentIntegration initialized")
 
     # LeadDiscovery Agent
-    def save_discovered_lead(self, username: str, source: str, profile_data: Dict) -> Dict:
-        """Save a newly discovered lead"""
+    def save_discovered_lead(self, name: str, email: str, source: str, profile_data: Dict = None) -> Dict:
+        """
+        Save a newly discovered lead to crm_leads table.
+
+        Real crm_leads columns: id, proposal_id, name, email, phone, company,
+        score, status, last_activity, total_time_seconds, visit_count, created_at,
+        ghl_contact_id, ghl_location_id, company_id, vertical, source_channel, current_agent
+        """
+        profile_data = profile_data or {}
         lead_data = {
-            'username': username,
-            'source_channel': source,  # 'instagram', 'linkedin', etc.
-            'full_name': profile_data.get('full_name'),
-            'bio': profile_data.get('bio'),
-            'followers_count': profile_data.get('followers_count'),
-            'following_count': profile_data.get('following_count'),
-            'is_business': profile_data.get('is_business', False),
-            'external_url': profile_data.get('external_url'),
-            'profile_pic_url': profile_data.get('profile_pic_url'),
-            'status': 'new',
+            'name': name,
+            'email': email,
+            'phone': profile_data.get('phone'),
+            'company': profile_data.get('company'),
+            'source_channel': source,  # 'instagram', 'linkedin', 'website', etc.
+            'status': profile_data.get('status', 'new'),
+            'score': profile_data.get('score', 0),
+            'vertical': profile_data.get('vertical'),
             'created_at': datetime.now(timezone.utc).isoformat()
         }
-        return self.db.upsert_lead(lead_data)
+        # Remove None values
+        lead_data = {k: v for k, v in lead_data.items() if v is not None}
+        return self.db.insert_lead(lead_data)
 
     # ProfileAnalyzer Agent
     def save_profile_analysis(self, lead_id: str, analysis: Dict) -> Dict:
@@ -367,7 +382,8 @@ def test_connection():
         else:
             print(f"✅ crm_leads accessible")
             if result:
-                print(f"   Sample lead: {result[0].get('username', 'N/A')}")
+                lead = result[0]
+                print(f"   Sample lead: {lead.get('name', 'N/A')} ({lead.get('email', 'N/A')})")
 
         return True
 
