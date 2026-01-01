@@ -287,6 +287,116 @@ class SocialfyAgentIntegration:
         lead_data = {k: v for k, v in lead_data.items() if v is not None}
         return self.db.insert_lead(lead_data)
 
+    def save_instagram_lead(self, instagram_data: Dict) -> Dict:
+        """
+        Save Instagram lead data to crm_leads table.
+
+        Maps Instagram profile data to crm_leads columns with proper score-to-status mapping.
+
+        Args:
+            instagram_data: Dict containing Instagram profile data with fields:
+                - name (required)
+                - email (optional)
+                - phone (optional)
+                - company (optional)
+                - score (optional, defaults to 0)
+                - username (optional)
+                - bio (optional)
+                - followers (optional)
+                - following (optional)
+
+        Returns:
+            Dict with Supabase response
+
+        Score to Status mapping:
+            - score >= 70 → "hot"
+            - score >= 40 → "engaged"
+            - score < 40 → "pending"
+        """
+        # Calculate status from score
+        score = instagram_data.get('score', 0)
+        if score >= 70:
+            status = 'hot'
+        elif score >= 40:
+            status = 'engaged'
+        else:
+            status = 'pending'
+
+        lead_data = {
+            'name': instagram_data.get('name'),
+            'email': instagram_data.get('email'),
+            'phone': instagram_data.get('phone'),
+            'company': instagram_data.get('company'),
+            'source_channel': 'instagram',
+            'status': status,
+            'score': score,
+            'vertical': instagram_data.get('vertical'),
+            'created_at': datetime.now(timezone.utc).isoformat()
+        }
+
+        # Remove None values
+        lead_data = {k: v for k, v in lead_data.items() if v is not None}
+
+        # Ensure we have at least a name
+        if not lead_data.get('name'):
+            raise ValueError("Instagram lead must have a name")
+
+        logger.info(f"Saving Instagram lead: {lead_data.get('name')} with status={status}, score={score}")
+        return self.db.insert_lead(lead_data)
+
+    def update_lead_from_scrape(self, lead_id: str, scraped_data: Dict) -> Dict:
+        """
+        Update an existing lead with newly scraped data.
+
+        Merges new scraped data with existing lead, updating score/status if provided.
+
+        Args:
+            lead_id: The UUID of the existing lead
+            scraped_data: Dict containing updated fields:
+                - email (optional)
+                - phone (optional)
+                - company (optional)
+                - score (optional, will recalculate status)
+                - Any other crm_leads fields
+
+        Returns:
+            Dict with Supabase response
+        """
+        updates = {}
+
+        # Add basic fields if provided
+        if scraped_data.get('email'):
+            updates['email'] = scraped_data['email']
+        if scraped_data.get('phone'):
+            updates['phone'] = scraped_data['phone']
+        if scraped_data.get('company'):
+            updates['company'] = scraped_data['company']
+        if scraped_data.get('vertical'):
+            updates['vertical'] = scraped_data['vertical']
+
+        # Handle score and status mapping
+        if 'score' in scraped_data:
+            score = scraped_data['score']
+            updates['score'] = score
+
+            # Recalculate status based on new score
+            if score >= 70:
+                updates['status'] = 'hot'
+            elif score >= 40:
+                updates['status'] = 'engaged'
+            else:
+                updates['status'] = 'pending'
+
+        # Add last_activity timestamp
+        updates['last_activity'] = datetime.now(timezone.utc).isoformat()
+
+        if not updates:
+            logger.warning(f"No updates provided for lead {lead_id}")
+            return {"error": "No updates provided"}
+
+        logger.info(f"Updating lead {lead_id} with scraped data: {list(updates.keys())}")
+        return self.db.update_lead(lead_id, updates)
+
     # ProfileAnalyzer Agent
     def save_profile_analysis(self, lead_id: str, analysis: Dict) -> Dict:
         """Save profile analysis with ICP score"""
