@@ -1,4 +1,4 @@
-import { Agent } from '@/lib/api';
+import { Agent } from '../lib/api';
 
 interface SquadCardProps {
   name: string;

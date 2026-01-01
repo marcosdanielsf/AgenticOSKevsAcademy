@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import useSWR from 'swr';
-import SquadCard from '@/components/SquadCard';
-import StatsCard from '@/components/StatsCard';
-import { fetchSystemHealth, SystemHealth, Agent } from '@/lib/api';
+import SquadCard from '../components/SquadCard';
+import StatsCard from '../components/StatsCard';
+import { fetchSystemHealth, SystemHealth, Agent } from '../lib/api';
 
 const squadIcons: Record<string, string> = {
   outbound: '🎯',
