@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
+import Link from 'next/link';
 import useSWR from 'swr';
 import SquadCard from '../components/SquadCard';
 import StatsCard from '../components/StatsCard';
@@ -75,6 +76,18 @@ export default function Dashboard() {
               <p className="text-slate-400 mt-1">Lead Generation & DM Automation</p>
             </div>
             <div className="flex items-center gap-4">
+              <Link
+                href="/logs"
+                className="px-4 py-2 rounded-xl font-medium bg-slate-800/50 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-300 transition-all duration-300 flex items-center gap-2"
+              >
+                <span>📋</span> Logs
+              </Link>
+              <Link
+                href="/metrics"
+                className="px-4 py-2 rounded-xl font-medium bg-slate-800/50 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-300 transition-all duration-300 flex items-center gap-2"
+              >
+                <span>📊</span> Metrics
+              </Link>
               <span
                 className={`px-4 py-2 rounded-full text-sm font-medium ${
                   health?.status === 'healthy'
