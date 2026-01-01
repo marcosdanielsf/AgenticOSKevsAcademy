@@ -24,6 +24,7 @@ load_dotenv()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from implementation.supabase_integration import SupabaseClient
+from implementation.instagram_api_scraper import InstagramAPIScraper
 
 
 # ============================================
@@ -230,95 +231,31 @@ async def scrape_likers(page, post_url: str, max_likers: int = MAX_LIKERS):
     return likers
 
 
-async def enrich_profile(page, username: str):
-    """Buscar informações básicas do perfil"""
+def enrich_profile(scraper: InstagramAPIScraper, username: str):
+    """Buscar informações completas do perfil usando API scraper"""
     try:
-        await page.goto(f"https://www.instagram.com/{username}/", wait_until="domcontentloaded")
-        await asyncio.sleep(random_delay(*DELAY_BETWEEN_PROFILES))
+        print(f"   🔍 Enriquecendo @{username} via API...")
 
-        # Extrair dados do perfil
-        profile_data = await page.evaluate('''() => {
-            const data = {
-                full_name: "",
-                bio: "",
-                followers: 0,
-                following: 0,
-                posts: 0,
-                is_private: false,
-                is_verified: false
-            };
+        # Usar API scraper para obter dados completos
+        profile_data = scraper.get_profile(username)
 
-            // Nome completo
-            const nameEl = document.querySelector('header section span');
-            if (nameEl) data.full_name = nameEl.textContent || "";
+        if profile_data.get("success"):
+            # Calcular score usando o método do scraper
+            score_data = scraper.calculate_lead_score(profile_data)
+            profile_data.update(score_data)
 
-            // Bio (pode estar em diferentes lugares)
-            const bioEl = document.querySelector('header section > div:last-child span');
-            if (bioEl) data.bio = bioEl.textContent || "";
+            # Adicionar delay para evitar rate limit
+            import time
+            time.sleep(random_delay(*DELAY_BETWEEN_PROFILES))
 
-            // Stats (followers, following, posts)
-            const stats = document.querySelectorAll('header section ul li span span');
-            stats.forEach((stat, i) => {
-                const text = stat.textContent || "";
-                const num = parseInt(text.replace(/[,\.K M]/g, "")) || 0;
-                if (i === 0) data.posts = num;
-                if (i === 1) data.followers = num;
-                if (i === 2) data.following = num;
-            });
-
-            // Verificado
-            const verified = document.querySelector('svg[aria-label="Verified"]');
-            data.is_verified = !!verified;
-
-            // Privado
-            const privateText = document.body.textContent || "";
-            data.is_private = privateText.includes("This account is private");
-
-            return data;
-        }''')
-
-        return profile_data
+            return profile_data
+        else:
+            print(f"   ⚠️ Erro ao buscar @{username}: {profile_data.get('error', 'unknown')}")
+            return None
 
     except Exception as e:
         print(f"   ⚠️ Erro ao buscar @{username}: {e}")
         return None
-
-
-def calculate_score(profile_data: dict) -> int:
-    """Calcular score do lead (0-100)"""
-    score = 0
-
-    followers = profile_data.get("followers", 0)
-    bio = (profile_data.get("bio") or "").lower()
-
-    # Score por followers
-    if followers >= 10000:
-        score += 25
-    elif followers >= 1000:
-        score += 15
-    elif followers >= 500:
-        score += 10
-
-    # Score por keywords na bio
-    business_keywords = ["ceo", "founder", "empreendedor", "empresa", "negócio",
-                        "marketing", "mentor", "coach", "consultor", "agência",
-                        "gestor", "diretor", "investidor", "startup"]
-
-    for kw in business_keywords:
-        if kw in bio:
-            score += 10
-            if score >= 50:
-                break
-
-    # Score por verificação
-    if profile_data.get("is_verified"):
-        score += 15
-
-    # Penalidade por conta privada
-    if profile_data.get("is_private"):
-        score -= 10
-
-    return max(0, min(100, score))
 
 
 async def save_to_supabase(likers: list, enrich: bool = False, page=None):
@@ -328,37 +265,76 @@ async def save_to_supabase(likers: list, enrich: bool = False, page=None):
     client = SupabaseClient()
     saved_count = 0
 
+    # Inicializar API scraper para enriquecimento
+    scraper = None
+    if enrich:
+        try:
+            scraper = InstagramAPIScraper()
+            print("✅ Instagram API Scraper inicializado")
+        except Exception as e:
+            print(f"⚠️ Erro ao inicializar API scraper: {e}")
+            print("   Continuando sem enriquecimento...")
+            enrich = False
+
     for i, liker in enumerate(likers, 1):
         username = liker["username"]
 
         # Enriquecer perfil se solicitado
         profile_data = {}
-        if enrich and page:
+        score = 30  # Score padrão
+        status = "pending"  # Status padrão
+
+        if enrich and scraper:
             print(f"   [{i}/{len(likers)}] Enriquecendo @{username}...")
-            profile_data = await enrich_profile(page, username) or {}
+            profile_data = enrich_profile(scraper, username) or {}
 
-        # Calcular score
-        score = calculate_score(profile_data) if profile_data else 30
+            if profile_data:
+                # Obter score calculado pelo API scraper
+                score = profile_data.get("score", 30)
 
-        # Mapear status baseado no score
-        if score >= 70:
-            status = "hot"
-        elif score >= 40:
-            status = "engaged"
-        else:
-            status = "pending"
+                # Mapear status baseado no score
+                # Valid status values: pending, viewed, engaged, hot, won, lost
+                if score >= 70:
+                    status = "hot"
+                elif score >= 40:
+                    status = "engaged"
+                else:
+                    status = "pending"
 
-        # Dados para salvar
+        # Preparar dados para salvar
         lead_data = {
             "name": profile_data.get("full_name") or username,
-            "email": f"{username}@instagram.placeholder",  # Placeholder
-            "phone": None,
-            "company": None,
             "source_channel": "instagram",
             "status": status,
             "score": score,
             "created_at": datetime.now().isoformat()
         }
+
+        # Adicionar email (pegar do perfil ou usar placeholder)
+        if profile_data.get("email"):
+            lead_data["email"] = profile_data["email"]
+        elif profile_data.get("email_hint"):
+            # Email hint está ofuscado, mas é melhor que nada
+            lead_data["email"] = f"{username}@instagram.placeholder"
+            # Adicionar hint como nota
+        else:
+            lead_data["email"] = f"{username}@instagram.placeholder"
+
+        # Adicionar telefone se disponível
+        if profile_data.get("phone"):
+            lead_data["phone"] = profile_data["phone"]
+        elif profile_data.get("phone_hint"):
+            lead_data["phone"] = profile_data["phone_hint"]
+
+        # Adicionar WhatsApp se disponível
+        if profile_data.get("whatsapp_number"):
+            # Adicionar ao campo phone ou criar campo customizado
+            if not lead_data.get("phone"):
+                lead_data["phone"] = profile_data["whatsapp_number"]
+
+        # Adicionar company se tiver categoria
+        if profile_data.get("category") or profile_data.get("business_category"):
+            lead_data["company"] = profile_data.get("category") or profile_data.get("business_category")
 
         # Remover None values
         lead_data = {k: v for k, v in lead_data.items() if v is not None}
@@ -369,7 +345,29 @@ async def save_to_supabase(likers: list, enrich: bool = False, page=None):
         if isinstance(result, list) and result:
             saved_count += 1
             lead_id = result[0].get("id", "?")
-            print(f"   ✅ @{username} → Score: {score} | Status: {status} | ID: {lead_id[:8]}...")
+
+            # Construir mensagem de log com dados enriquecidos
+            log_parts = [f"@{username}", f"Score: {score}", f"Status: {status}"]
+
+            if profile_data.get("email") or profile_data.get("email_hint"):
+                email_display = profile_data.get("email") or profile_data.get("email_hint")
+                log_parts.append(f"Email: {email_display}")
+
+            if profile_data.get("phone") or profile_data.get("phone_hint"):
+                phone_display = profile_data.get("phone") or profile_data.get("phone_hint")
+                log_parts.append(f"Phone: {phone_display}")
+
+            if profile_data.get("whatsapp_linked"):
+                log_parts.append("WhatsApp: ✓")
+
+            if profile_data.get("user_id"):
+                log_parts.append(f"UID: {profile_data['user_id']}")
+
+            if profile_data.get("fb_id"):
+                log_parts.append(f"FBID: {profile_data['fb_id']}")
+
+            print(f"   ✅ {' | '.join(log_parts)} | ID: {lead_id[:8]}...")
+
         elif "error" in str(result):
             print(f"   ⚠️ @{username} → Erro: {result.get('error', 'unknown')[:50]}")
         else:
