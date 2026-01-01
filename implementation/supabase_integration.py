@@ -322,12 +322,25 @@ class SocialfyAgentIntegration:
         else:
             status = 'pending'
 
+        # Build Instagram profile URL
+        username = instagram_data.get('username', '')
+        instagram_url = f"https://instagram.com/{username}" if username else None
+
+        # Combine bio with Instagram URL in notes
+        bio = instagram_data.get('biography') or instagram_data.get('bio') or ''
+        notes_parts = []
+        if instagram_url:
+            notes_parts.append(f"Instagram: {instagram_url}")
+        if bio:
+            notes_parts.append(f"Bio: {bio}")
+        notes = "\n".join(notes_parts) if notes_parts else None
+
         lead_data = {
             'name': instagram_data.get('name'),
             'email': instagram_data.get('email'),
             'phone': instagram_data.get('phone'),
             'company': instagram_data.get('company'),
-            'notes': instagram_data.get('biography') or instagram_data.get('bio'),  # Bio do Instagram
+            'notes': notes,
             'source_channel': 'instagram',
             'status': status,
             'score': score,
