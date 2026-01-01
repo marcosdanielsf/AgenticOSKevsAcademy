@@ -278,7 +278,7 @@ class SocialfyAgentIntegration:
             'phone': profile_data.get('phone'),
             'company': profile_data.get('company'),
             'source_channel': source,  # 'instagram', 'linkedin', 'website', etc.
-            'status': profile_data.get('status', 'new'),
+            'status': profile_data.get('status', 'cold'),  # Valid: hot, warm, cold
             'score': profile_data.get('score', 0),
             'vertical': profile_data.get('vertical'),
             'created_at': datetime.now(timezone.utc).isoformat()
