@@ -158,11 +158,18 @@ class InboundLeadHandler:
                 profile_data=profile_data
             )
 
-            if 'error' in crm_record:
+            if isinstance(crm_record, dict) and 'error' in crm_record:
                 logger.warning(f"⚠️ Error saving to Supabase: {crm_record['error']}")
                 # Continue anyway - we still return the data for AI SDR
             else:
-                logger.info(f"✅ Saved to CRM: {crm_record.get('id', 'unknown ID')}")
+                # Supabase returns a list on successful insert
+                if isinstance(crm_record, list) and crm_record:
+                    crm_id = crm_record[0].get('id', 'unknown ID')
+                elif isinstance(crm_record, dict):
+                    crm_id = crm_record.get('id', 'unknown ID')
+                else:
+                    crm_id = 'unknown ID'
+                logger.info(f"✅ Saved to CRM: {crm_id}")
 
             # Step 6: Build AI context for SDR
             ai_context = self._build_ai_context(profile, qualification)
