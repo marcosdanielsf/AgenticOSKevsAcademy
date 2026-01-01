@@ -6,8 +6,10 @@ FastAPI server that bridges n8n workflows with Python agents.
 This is the central hub for all automation operations.
 
 Endpoints:
-- /webhook/scrape-profile - Scrape Instagram profile
-- /webhook/scrape-likers - Scrape post likers
+- /webhook/inbound-dm - Process inbound DM (scrape, qualify, save to Supabase)
+- /webhook/scrape-profile - Scrape Instagram profile via API with scoring
+- /webhook/scrape-post-likers - Scrape post likers and save to Supabase
+- /webhook/scrape-likers - Scrape post likers (legacy)
 - /webhook/scrape-commenters - Scrape post commenters
 - /webhook/send-dm - Send DM to user
 - /webhook/check-inbox - Check for new messages
@@ -142,6 +144,34 @@ class WebhookPayload(BaseModel):
     data: Dict[str, Any]
     tenant_id: Optional[str] = None
     timestamp: Optional[str] = None
+
+class InboundDMRequest(BaseModel):
+    username: str
+    message: str
+    tenant_id: Optional[str] = None
+
+class InboundDMResponse(BaseModel):
+    success: bool
+    username: str
+    lead_id: Optional[str] = None
+    score: int = 0
+    classification: str = "LEAD_COLD"
+    suggested_response: Optional[str] = None
+    profile: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+class ScrapePostLikersRequest(BaseModel):
+    post_url: str
+    max_likers: int = 50
+    tenant_id: Optional[str] = None
+    save_to_db: bool = True
+
+class ScrapePostLikersResponse(BaseModel):
+    success: bool
+    total_scraped: int = 0
+    leads_saved: int = 0
+    post_url: str
+    error: Optional[str] = None
 
 
 # ============================================
@@ -491,58 +521,91 @@ async def root():
 # SCRAPING ENDPOINTS
 # ============================================
 
-@app.post("/webhook/scrape-profile", response_model=ScrapeProfileResponse)
+@app.post("/webhook/scrape-profile")
 async def scrape_profile(request: ScrapeProfileRequest):
     """
-    Scrape Instagram profile data.
+    Scrape Instagram profile data via API.
     Called by n8n when a new lead needs enrichment.
+
+    Returns full profile data with score and classification.
     """
     logger.info(f"Scraping profile: @{request.username}")
 
     try:
-        browser_manager = await BrowserManager.get_instance()
-        if not browser_manager.is_initialized:
-            await browser_manager.initialize(headless=True)
+        # Use the Instagram API scraper for more data
+        from instagram_api_scraper import InstagramAPIScraper
+        from supabase_integration import SocialfyAgentIntegration
 
-        scraper = get_profile_scraper(browser_manager.page)
-        profile = await scraper.scrape_profile(request.username)
+        scraper = InstagramAPIScraper()
+        profile = scraper.get_profile(request.username)
+
+        if not profile.get("success"):
+            return {
+                "success": False,
+                "username": request.username,
+                "error": profile.get("error", "Failed to scrape profile")
+            }
+
+        # Calculate lead score
+        score_data = scraper.calculate_lead_score(profile)
 
         # Save to database if requested
-        if request.save_to_db and profile.scrape_success:
-            db.save_lead({
-                "username": profile.username,
-                "full_name": profile.full_name,
-                "bio": profile.bio,
-                "followers_count": profile.followers_count,
-                "following_count": profile.following_count,
-                "posts_count": profile.posts_count,
-                "is_verified": profile.is_verified,
-                "is_private": profile.is_private,
-                "source": "api_scrape",
-                "tenant_id": request.tenant_id
-            })
+        if request.save_to_db:
+            integration = SocialfyAgentIntegration()
+            integration.save_discovered_lead(
+                name=profile.get("full_name") or request.username,
+                email=profile.get("email") or f"{request.username}@instagram.com",
+                source="api_scrape",
+                profile_data={
+                    "username": request.username,
+                    "bio": profile.get("bio"),
+                    "followers_count": profile.get("followers_count"),
+                    "following_count": profile.get("following_count"),
+                    "is_business": profile.get("is_business"),
+                    "is_verified": profile.get("is_verified"),
+                    "score": score_data.get("score", 0),
+                    "status": "warm" if score_data.get("score", 0) >= 40 else "cold",
+                    "phone": profile.get("phone") or profile.get("phone_hint"),
+                    "company": profile.get("category")
+                }
+            )
 
-        return ScrapeProfileResponse(
-            success=profile.scrape_success,
-            username=profile.username,
-            full_name=profile.full_name,
-            bio=profile.bio,
-            followers_count=profile.followers_count,
-            following_count=profile.following_count,
-            posts_count=profile.posts_count,
-            is_verified=profile.is_verified,
-            is_private=profile.is_private,
-            category=profile.category,
-            error=profile.error_message
-        )
+        # Return comprehensive profile data with score
+        return {
+            "success": True,
+            "username": profile.get("username"),
+            "full_name": profile.get("full_name"),
+            "bio": profile.get("bio"),
+            "followers_count": profile.get("followers_count", 0),
+            "following_count": profile.get("following_count", 0),
+            "posts_count": profile.get("posts_count", 0),
+            "is_verified": profile.get("is_verified", False),
+            "is_private": profile.get("is_private", False),
+            "is_business": profile.get("is_business", False),
+            "category": profile.get("category"),
+            "profile_pic_url": profile.get("profile_pic_url_hd") or profile.get("profile_pic_url"),
+            "external_url": profile.get("external_url"),
+            "email": profile.get("email"),
+            "email_hint": profile.get("email_hint"),
+            "phone": profile.get("phone"),
+            "phone_hint": profile.get("phone_hint"),
+            "whatsapp_linked": profile.get("whatsapp_linked"),
+            "user_id": profile.get("user_id"),
+            "fb_id": profile.get("fb_id"),
+            "score": score_data.get("score", 0),
+            "classification": score_data.get("classification", "LEAD_COLD"),
+            "signals": score_data.get("signals", []),
+            "scraped_at": profile.get("scraped_at"),
+            "method": profile.get("method")
+        }
 
     except Exception as e:
-        logger.error(f"Error scraping profile: {e}")
-        return ScrapeProfileResponse(
-            success=False,
-            username=request.username,
-            error=str(e)
-        )
+        logger.error(f"Error scraping profile: {e}", exc_info=True)
+        return {
+            "success": False,
+            "username": request.username,
+            "error": str(e)
+        }
 
 
 @app.post("/webhook/scrape-likers")
@@ -580,6 +643,81 @@ async def scrape_likers(request: ScrapeLikersRequest, background_tasks: Backgrou
         "message": f"Scraping likers from {request.post_url} (limit: {request.limit})",
         "check_results": "/api/leads?source=post_like"
     }
+
+
+@app.post("/webhook/scrape-post-likers", response_model=ScrapePostLikersResponse)
+async def scrape_post_likers(request: ScrapePostLikersRequest, background_tasks: BackgroundTasks):
+    """
+    Scrape users who liked a post (n8n endpoint).
+    Scrapes likers, saves to Supabase, and returns summary.
+
+    This endpoint returns immediately and processes in background.
+    For synchronous processing, increase timeout.
+    """
+    logger.info(f"Scraping post likers: {request.post_url} (max: {request.max_likers})")
+
+    response = ScrapePostLikersResponse(
+        success=False,
+        post_url=request.post_url
+    )
+
+    async def scrape_task():
+        """Background task to scrape likers"""
+        try:
+            from instagram_post_likers_scraper import PostLikersScraper
+            from supabase_integration import SocialfyAgentIntegration
+
+            scraper = PostLikersScraper(headless=True)
+            integration = SocialfyAgentIntegration()
+
+            await scraper.start()
+
+            if await scraper.verify_login():
+                # Scrape likers
+                likers = await scraper.scrape_likers(request.post_url, limit=request.max_likers)
+
+                logger.info(f"Scraped {len(likers)} likers from post")
+
+                # Save to Supabase if requested
+                if request.save_to_db:
+                    saved_count = 0
+                    for liker in likers:
+                        try:
+                            # Save each liker as a lead
+                            integration.save_discovered_lead(
+                                name=liker.get("full_name") or liker.get("username"),
+                                email=f"{liker.get('username')}@instagram.com",  # Placeholder
+                                source="post_like",
+                                profile_data={
+                                    "username": liker.get("username"),
+                                    "bio": liker.get("bio"),
+                                    "followers_count": liker.get("followers_count", 0),
+                                    "is_verified": liker.get("is_verified", False),
+                                    "is_private": liker.get("is_private", False),
+                                    "source_url": request.post_url
+                                }
+                            )
+                            saved_count += 1
+                        except Exception as e:
+                            logger.warning(f"Failed to save liker {liker.get('username')}: {e}")
+
+                    logger.info(f"Saved {saved_count}/{len(likers)} likers to Supabase")
+
+            await scraper.stop()
+
+        except Exception as e:
+            logger.error(f"Error in post likers scrape task: {e}", exc_info=True)
+
+    # Start background task
+    background_tasks.add_task(scrape_task)
+
+    # Return immediate response
+    return ScrapePostLikersResponse(
+        success=True,
+        total_scraped=0,  # Will be updated in background
+        leads_saved=0,    # Will be updated in background
+        post_url=request.post_url
+    )
 
 
 @app.post("/webhook/scrape-commenters")
@@ -622,6 +760,149 @@ async def scrape_commenters(request: ScrapeCommentersRequest, background_tasks: 
 # ============================================
 # DM ENDPOINTS
 # ============================================
+
+@app.post("/webhook/inbound-dm", response_model=InboundDMResponse)
+async def webhook_inbound_dm(request: InboundDMRequest):
+    """
+    Process an inbound DM from n8n.
+    Scrapes the user's profile, qualifies the lead, and saves to Supabase.
+
+    Flow:
+    1. Scrape profile using Instagram API
+    2. Calculate lead score
+    3. Save to Supabase (crm_leads + socialfy_leads)
+    4. Generate AI classification and suggested response
+    5. Return lead data with score and suggested response
+    """
+    logger.info(f"Processing inbound DM from @{request.username}")
+
+    result = InboundDMResponse(
+        success=False,
+        username=request.username
+    )
+
+    try:
+        # Import the API scraper and Supabase integration
+        from instagram_api_scraper import InstagramAPIScraper
+        from supabase_integration import SocialfyAgentIntegration
+
+        # Initialize scraper and integration
+        scraper = InstagramAPIScraper()
+        integration = SocialfyAgentIntegration()
+
+        # 1. Scrape the user's profile
+        logger.info(f"Scraping profile for @{request.username}")
+        profile = scraper.get_profile(request.username)
+
+        if not profile.get("success"):
+            result.error = f"Failed to scrape profile: {profile.get('error', 'Unknown error')}"
+            return result
+
+        # 2. Calculate lead score
+        score_data = scraper.calculate_lead_score(profile)
+        score = score_data.get("score", 0)
+        classification = score_data.get("classification", "LEAD_COLD")
+
+        logger.info(f"Lead score for @{request.username}: {score}/100 ({classification})")
+
+        # 3. Save to Supabase
+        # Save to crm_leads
+        lead_record = integration.save_discovered_lead(
+            name=profile.get("full_name") or request.username,
+            email=profile.get("email") or f"{request.username}@instagram.com",  # Placeholder email
+            source="instagram_dm",
+            profile_data={
+                "username": request.username,
+                "bio": profile.get("bio"),
+                "followers_count": profile.get("followers_count"),
+                "following_count": profile.get("following_count"),
+                "is_business": profile.get("is_business"),
+                "is_verified": profile.get("is_verified"),
+                "score": score,
+                "status": "warm" if score >= 40 else "cold",
+                "phone": profile.get("phone") or profile.get("phone_hint"),
+                "company": profile.get("category")
+            }
+        )
+
+        # Extract lead_id from response
+        lead_id = None
+        if isinstance(lead_record, list) and lead_record:
+            lead_id = lead_record[0].get("id")
+        elif isinstance(lead_record, dict):
+            lead_id = lead_record.get("id")
+
+        # Save the received message
+        if lead_id:
+            integration.save_received_message(
+                lead_id=lead_id,
+                message=request.message
+            )
+
+        # 4. Generate AI classification and suggested response using Gemini
+        suggested_response = None
+        try:
+            import google.generativeai as genai
+
+            api_key = os.getenv("GEMINI_API_KEY")
+            if api_key:
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel("gemini-1.5-flash")
+
+                prompt = f"""Você é um assistente de vendas no Instagram.
+
+Recebeu uma DM de @{request.username}:
+"{request.message}"
+
+Perfil do lead:
+- Nome: {profile.get('full_name', 'N/A')}
+- Bio: {profile.get('bio', 'N/A')}
+- Seguidores: {profile.get('followers_count', 0):,}
+- Business: {'Sim' if profile.get('is_business') else 'Não'}
+- Score: {score}/100 ({classification})
+
+Gere uma resposta natural e amigável que:
+1. Agradeça pela mensagem
+2. Demonstre interesse genuíno
+3. Faça uma pergunta relevante para qualificar o lead
+4. Seja concisa (máx 2-3 frases)
+
+Responda APENAS com o texto da mensagem, sem explicações."""
+
+                response = model.generate_content(prompt)
+                suggested_response = response.text.strip()
+
+                logger.info(f"Generated suggested response: {suggested_response[:50]}...")
+
+        except Exception as e:
+            logger.warning(f"Failed to generate suggested response: {e}")
+
+        # 5. Return result
+        result.success = True
+        result.lead_id = lead_id
+        result.score = score
+        result.classification = classification
+        result.suggested_response = suggested_response
+        result.profile = {
+            "username": profile.get("username"),
+            "full_name": profile.get("full_name"),
+            "bio": profile.get("bio"),
+            "followers_count": profile.get("followers_count"),
+            "following_count": profile.get("following_count"),
+            "posts_count": profile.get("posts_count"),
+            "is_business": profile.get("is_business"),
+            "is_verified": profile.get("is_verified"),
+            "category": profile.get("category")
+        }
+
+        logger.info(f"✅ Inbound DM processed successfully for @{request.username}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error processing inbound DM: {e}", exc_info=True)
+        result.error = str(e)
+        return result
+
 
 @app.post("/webhook/send-dm", response_model=SendDMResponse)
 async def send_dm(request: SendDMRequest):
