@@ -1427,16 +1427,19 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Socialfy API Server')
     parser.add_argument('--host', default='0.0.0.0', help='Host to bind')
-    parser.add_argument('--port', type=int, default=8000, help='Port to bind')
+    parser.add_argument('--port', type=int, default=None, help='Port to bind')
     parser.add_argument('--reload', action='store_true', help='Enable auto-reload')
     args = parser.parse_args()
 
-    logger.info(f"Starting Socialfy API on {args.host}:{args.port}")
+    # Use PORT from environment (Railway) or default to 8000
+    port = args.port or int(os.getenv('PORT', 8000))
+
+    logger.info(f"Starting Socialfy API on {args.host}:{port}")
 
     uvicorn.run(
         "api_server:app",
         host=args.host,
-        port=args.port,
+        port=port,
         reload=args.reload,
         log_level="info"
     )
