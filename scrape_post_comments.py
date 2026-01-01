@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-🔍 SCRAPE POST LIKERS → SUPABASE
-================================
-Scrape likers de um post do Instagram e salva no crm_leads.
+💬 SCRAPE POST COMMENTS → SUPABASE
+==================================
+Scrape usuários que comentaram em um post do Instagram e salva no crm_leads.
 
 Uso:
-    python3 scrape_post_likers.py https://www.instagram.com/p/DQm5K-qEZEZ/
+    python3 scrape_post_comments.py https://www.instagram.com/p/DQm5K-qEZEZ/
+    python3 scrape_post_comments.py https://www.instagram.com/p/DQm5K-qEZEZ/ --max 30 --enrich
 """
 
 import os
@@ -36,7 +37,7 @@ INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD")
 SESSION_PATH = Path(__file__).parent / "sessions" / "instagram_session.json"
 
 # Rate limits (segurança)
-MAX_LIKERS = 50  # Máximo de likers para scrape por execução
+MAX_COMMENTERS = 50  # Máximo de commenters para scrape por execução
 DELAY_BETWEEN_PROFILES = (2, 5)  # Segundos entre cada perfil
 DELAY_SCROLL = (1, 3)  # Segundos entre scrolls
 
@@ -69,9 +70,6 @@ async def login_instagram(page):
     await asyncio.sleep(3)
 
     # Verificar se já está logado
-    current_url = page.url
-
-    # Tentar encontrar elemento de usuário logado
     try:
         profile_link = await page.wait_for_selector(
             'svg[aria-label="Settings"], a[href*="/direct/"], svg[aria-label="Home"]',
@@ -129,106 +127,89 @@ async def login_instagram(page):
         return False
 
 
-async def scrape_likers(page, post_url: str, max_likers: int = MAX_LIKERS):
-    """Scrape likers de um post"""
+async def scrape_commenters(page, post_url: str, max_commenters: int = MAX_COMMENTERS):
+    """Scrape usuários que comentaram em um post"""
     print(f"\n📸 Acessando post: {post_url}")
 
     await page.goto(post_url, wait_until="domcontentloaded")
     await asyncio.sleep(3)
 
-    # Clicar em "likes" para abrir modal
-    print("🔍 Procurando botão de likes...")
-
-    try:
-        # Tentar encontrar o link de likes (vários seletores possíveis)
-        likes_selectors = [
-            'a[href*="/liked_by/"]',
-            'span:has-text("likes")',
-            'button:has-text("others")',
-            'a:has-text("likes")',
-            'section a[href*="liked_by"]'
-        ]
-
-        likes_button = None
-        for selector in likes_selectors:
-            try:
-                likes_button = await page.wait_for_selector(selector, timeout=3000)
-                if likes_button:
-                    break
-            except:
-                continue
-
-        if not likes_button:
-            # Tentar clicar no número de likes diretamente
-            likes_button = await page.query_selector('section span:has-text("like")')
-
-        if likes_button:
-            await likes_button.click()
-            print("✅ Modal de likes aberto")
-            await asyncio.sleep(2)
-        else:
-            print("⚠️ Não encontrou botão de likes, tentando URL direta...")
-            # Tentar acessar URL de likes diretamente
-            post_id = post_url.split("/p/")[1].rstrip("/")
-            await page.goto(f"https://www.instagram.com/p/{post_id}/liked_by/", wait_until="domcontentloaded")
-            await asyncio.sleep(3)
-
-    except Exception as e:
-        print(f"⚠️ Erro ao abrir likes: {e}")
-
-    # Coletar usernames dos likers
-    likers = []
+    # Coletar usernames dos comentaristas
+    commenters = []
     seen_usernames = set()
     scroll_count = 0
     max_scrolls = 20
 
-    print(f"📋 Coletando até {max_likers} likers...")
+    print(f"📋 Coletando até {max_commenters} comentaristas...")
 
-    while len(likers) < max_likers and scroll_count < max_scrolls:
-        # Extrair usernames visíveis
-        usernames = await page.evaluate('''() => {
-            const users = [];
-            // Procurar links de perfil no modal
-            const links = document.querySelectorAll('a[href^="/"][role="link"]');
-            links.forEach(link => {
-                const href = link.getAttribute("href");
-                if (href && href.match(/^\/[a-zA-Z0-9_.]+\/?$/) && !href.includes("/p/")) {
-                    const username = href.replace(/\//g, "");
-                    if (username && username.length > 0 && username !== "explore") {
-                        users.push(username);
+    # Tentar expandir comentários se houver "View all X comments"
+    try:
+        view_all = await page.query_selector('span:has-text("View all"), span:has-text("Ver todos")')
+        if view_all:
+            await view_all.click()
+            await asyncio.sleep(2)
+    except:
+        pass
+
+    while len(commenters) < max_commenters and scroll_count < max_scrolls:
+        # Extrair usernames dos comentários
+        comment_data = await page.evaluate('''() => {
+            const comments = [];
+            // Procurar links de perfil em comentários
+            const commentElements = document.querySelectorAll('ul ul li, div[role="button"] a[href^="/"]');
+
+            commentElements.forEach(el => {
+                // Procurar link do username dentro do comentário
+                const userLink = el.querySelector('a[href^="/"][role="link"]') || el;
+                if (userLink && userLink.href) {
+                    const href = new URL(userLink.href).pathname;
+                    if (href.match(/^\/[a-zA-Z0-9_.]+\/?$/) && !href.includes("/p/")) {
+                        const username = href.replace(/\//g, "");
+                        if (username && username.length > 0 && username !== "explore") {
+                            // Tentar pegar o texto do comentário
+                            const commentText = el.textContent || "";
+                            comments.push({
+                                username: username,
+                                comment_preview: commentText.substring(0, 100)
+                            });
+                        }
                     }
                 }
             });
-            return [...new Set(users)];
+            return comments;
         }''')
 
         # Adicionar novos usernames
-        for username in usernames:
-            if username not in seen_usernames and len(likers) < max_likers:
+        for data in comment_data:
+            username = data.get('username')
+            if username and username not in seen_usernames and len(commenters) < max_commenters:
                 seen_usernames.add(username)
-                likers.append({
+                commenters.append({
                     "username": username,
-                    "source": "post_likers",
+                    "comment_preview": data.get('comment_preview', ''),
+                    "source": "post_comment",
                     "post_url": post_url,
                     "scraped_at": datetime.now().isoformat()
                 })
-                print(f"   [{len(likers)}/{max_likers}] @{username}")
+                print(f"   [{len(commenters)}/{max_commenters}] @{username}")
 
-        # Scroll no modal
+        # Scroll para carregar mais comentários
         await page.evaluate('''() => {
-            const modal = document.querySelector('div[role="dialog"] div[style*="overflow"]');
-            if (modal) modal.scrollTop = modal.scrollHeight;
+            const comments = document.querySelector('ul[class*="Comment"]');
+            if (comments) comments.scrollTop = comments.scrollHeight;
+            // Também scrollar na página principal
+            window.scrollBy(0, 300);
         }''')
 
         await asyncio.sleep(random_delay(*DELAY_SCROLL))
         scroll_count += 1
 
         # Verificar se chegou ao fim
-        if len(usernames) == 0:
+        if len(comment_data) == 0 and scroll_count > 3:
             break
 
-    print(f"\n✅ Total de likers coletados: {len(likers)}")
-    return likers
+    print(f"\n✅ Total de comentaristas coletados: {len(commenters)}")
+    return commenters
 
 
 def enrich_profile(scraper: InstagramAPIScraper, username: str):
@@ -258,8 +239,8 @@ def enrich_profile(scraper: InstagramAPIScraper, username: str):
         return None
 
 
-async def save_to_supabase(likers: list, enrich: bool = False, page=None):
-    """Salvar likers no Supabase"""
+async def save_to_supabase(commenters: list, enrich: bool = False):
+    """Salvar comentaristas no Supabase"""
     print_header("SALVANDO NO SUPABASE")
 
     client = SupabaseClient()
@@ -276,24 +257,21 @@ async def save_to_supabase(likers: list, enrich: bool = False, page=None):
             print("   Continuando sem enriquecimento...")
             enrich = False
 
-    for i, liker in enumerate(likers, 1):
-        username = liker["username"]
+    for i, commenter in enumerate(commenters, 1):
+        username = commenter["username"]
 
         # Enriquecer perfil se solicitado
         profile_data = {}
-        score = 30  # Score padrão
-        status = "pending"  # Status padrão
+        score = 35  # Score padrão para comentaristas (um pouco mais que likers)
+        status = "pending"
 
         if enrich and scraper:
-            print(f"   [{i}/{len(likers)}] Enriquecendo @{username}...")
+            print(f"   [{i}/{len(commenters)}] Enriquecendo @{username}...")
             profile_data = enrich_profile(scraper, username) or {}
 
             if profile_data:
-                # Obter score calculado pelo API scraper
-                score = profile_data.get("score", 30)
+                score = profile_data.get("score", 35)
 
-                # Mapear status baseado no score
-                # Valid status values: pending, viewed, engaged, hot, won, lost
                 if score >= 70:
                     status = "hot"
                 elif score >= 40:
@@ -304,28 +282,28 @@ async def save_to_supabase(likers: list, enrich: bool = False, page=None):
         # Build Instagram profile URL and notes
         instagram_url = f"https://instagram.com/{username}"
         bio = profile_data.get("biography") or profile_data.get("bio") or ""
+        comment_preview = commenter.get("comment_preview", "")
+
         notes_parts = [f"Instagram: {instagram_url}"]
         if bio:
             notes_parts.append(f"Bio: {bio}")
+        if comment_preview:
+            notes_parts.append(f"Comentário: {comment_preview[:50]}...")
         notes = "\n".join(notes_parts)
 
         # Preparar dados para salvar
         lead_data = {
             "name": profile_data.get("full_name") or username,
-            "source_channel": "instagram_like",  # Específico: veio de curtida
+            "source_channel": "instagram_comment",  # Específico: veio de comentário
             "notes": notes,
             "status": status,
             "score": score,
             "created_at": datetime.now().isoformat()
         }
 
-        # Adicionar email (pegar do perfil ou usar placeholder)
+        # Adicionar email se disponível
         if profile_data.get("email"):
             lead_data["email"] = profile_data["email"]
-        elif profile_data.get("email_hint"):
-            # Email hint está ofuscado, mas é melhor que nada
-            lead_data["email"] = f"{username}@instagram.placeholder"
-            # Adicionar hint como nota
         else:
             lead_data["email"] = f"{username}@instagram.placeholder"
 
@@ -334,12 +312,6 @@ async def save_to_supabase(likers: list, enrich: bool = False, page=None):
             lead_data["phone"] = profile_data["phone"]
         elif profile_data.get("phone_hint"):
             lead_data["phone"] = profile_data["phone_hint"]
-
-        # Adicionar WhatsApp se disponível
-        if profile_data.get("whatsapp_number"):
-            # Adicionar ao campo phone ou criar campo customizado
-            if not lead_data.get("phone"):
-                lead_data["phone"] = profile_data["whatsapp_number"]
 
         # Adicionar company se tiver categoria
         if profile_data.get("category") or profile_data.get("business_category"):
@@ -354,36 +326,14 @@ async def save_to_supabase(likers: list, enrich: bool = False, page=None):
         if isinstance(result, list) and result:
             saved_count += 1
             lead_id = result[0].get("id", "?")
-
-            # Construir mensagem de log com dados enriquecidos
-            log_parts = [f"@{username}", f"Score: {score}", f"Status: {status}"]
-
-            if profile_data.get("email") or profile_data.get("email_hint"):
-                email_display = profile_data.get("email") or profile_data.get("email_hint")
-                log_parts.append(f"Email: {email_display}")
-
-            if profile_data.get("phone") or profile_data.get("phone_hint"):
-                phone_display = profile_data.get("phone") or profile_data.get("phone_hint")
-                log_parts.append(f"Phone: {phone_display}")
-
-            if profile_data.get("whatsapp_linked"):
-                log_parts.append("WhatsApp: ✓")
-
-            if profile_data.get("user_id"):
-                log_parts.append(f"UID: {profile_data['user_id']}")
-
-            if profile_data.get("fb_id"):
-                log_parts.append(f"FBID: {profile_data['fb_id']}")
-
-            print(f"   ✅ {' | '.join(log_parts)} | ID: {lead_id[:8]}...")
-
+            print(f"   ✅ @{username} | Score: {score} | Status: {status} | ID: {lead_id[:8]}...")
         elif "error" in str(result):
             print(f"   ⚠️ @{username} → Erro: {result.get('error', 'unknown')[:50]}")
         else:
             saved_count += 1
             print(f"   ✅ @{username} → Score: {score} | Status: {status}")
 
-    print(f"\n📊 Total salvo: {saved_count}/{len(likers)}")
+    print(f"\n📊 Total salvo: {saved_count}/{len(commenters)}")
     return saved_count
 
 
@@ -391,11 +341,11 @@ async def save_to_supabase(likers: list, enrich: bool = False, page=None):
 # MAIN
 # ============================================
 
-async def main(post_url: str, max_likers: int = MAX_LIKERS, enrich: bool = False):
+async def main(post_url: str, max_commenters: int = MAX_COMMENTERS, enrich: bool = False):
     """Função principal"""
-    print_header("SCRAPE POST LIKERS → SUPABASE")
+    print_header("SCRAPE POST COMMENTS → SUPABASE")
     print(f"📸 Post: {post_url}")
-    print(f"🎯 Max likers: {max_likers}")
+    print(f"🎯 Max comentaristas: {max_commenters}")
     print(f"🔍 Enriquecer perfis: {'Sim' if enrich else 'Não'}")
 
     try:
@@ -434,18 +384,19 @@ async def main(post_url: str, max_likers: int = MAX_LIKERS, enrich: bool = False
             print("❌ Não foi possível fazer login")
             return
 
-        # Scrape likers
-        likers = await scrape_likers(page, post_url, max_likers)
+        # Scrape commenters
+        commenters = await scrape_commenters(page, post_url, max_commenters)
 
-        if not likers:
-            print("⚠️ Nenhum liker encontrado")
+        if not commenters:
+            print("⚠️ Nenhum comentarista encontrado")
             return
 
         # Salvar no Supabase
-        saved = await save_to_supabase(likers, enrich=enrich, page=page if enrich else None)
+        saved = await save_to_supabase(commenters, enrich=enrich)
 
         print_header("CONCLUÍDO")
         print(f"✅ {saved} leads salvos no crm_leads!")
+        print(f"📊 source_channel: instagram_comment")
 
     finally:
         # Salvar sessão atualizada
@@ -458,9 +409,9 @@ async def main(post_url: str, max_likers: int = MAX_LIKERS, enrich: bool = False
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Scrape Instagram post likers")
+    parser = argparse.ArgumentParser(description="Scrape Instagram post commenters")
     parser.add_argument("post_url", help="URL do post do Instagram")
-    parser.add_argument("--max", type=int, default=MAX_LIKERS, help=f"Máximo de likers (default: {MAX_LIKERS})")
+    parser.add_argument("--max", type=int, default=MAX_COMMENTERS, help=f"Máximo de comentaristas (default: {MAX_COMMENTERS})")
     parser.add_argument("--enrich", action="store_true", help="Enriquecer perfis (mais lento)")
 
     args = parser.parse_args()

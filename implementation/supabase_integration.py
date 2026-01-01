@@ -270,16 +270,42 @@ class SocialfyAgentIntegration:
         Real crm_leads columns: id, proposal_id, name, email, phone, company,
         score, status, last_activity, total_time_seconds, visit_count, created_at,
         ghl_contact_id, ghl_location_id, company_id, vertical, source_channel, current_agent
+
+        Source channel examples:
+        - instagram_dm, instagram_like, instagram_comment, instagram_follower
+        - linkedin, website, referral, etc.
         """
         profile_data = profile_data or {}
+
+        # Build notes with Instagram URL and bio if available
+        notes_parts = []
+        full_profile = profile_data.get('full_profile', {})
+        username = full_profile.get('username', '')
+        if username:
+            notes_parts.append(f"Instagram: https://instagram.com/{username}")
+        bio = full_profile.get('biography') or full_profile.get('bio', '')
+        if bio:
+            notes_parts.append(f"Bio: {bio}")
+        notes = "\n".join(notes_parts) if notes_parts else None
+
+        # Calculate status from score (valid: pending, viewed, engaged, hot, won, lost)
+        score = profile_data.get('score', 0)
+        if score >= 70:
+            status = 'hot'
+        elif score >= 40:
+            status = 'engaged'
+        else:
+            status = 'pending'
+
         lead_data = {
             'name': name,
             'email': email,
             'phone': profile_data.get('phone'),
             'company': profile_data.get('company'),
-            'source_channel': source,  # 'instagram', 'linkedin', 'website', etc.
-            'status': profile_data.get('status', 'cold'),  # Valid: hot, warm, cold
-            'score': profile_data.get('score', 0),
+            'notes': notes,
+            'source_channel': source,  # instagram_dm, instagram_like, instagram_comment, etc.
+            'status': status,
+            'score': score,
             'vertical': profile_data.get('vertical'),
             'created_at': datetime.now(timezone.utc).isoformat()
         }
@@ -335,13 +361,18 @@ class SocialfyAgentIntegration:
             notes_parts.append(f"Bio: {bio}")
         notes = "\n".join(notes_parts) if notes_parts else None
 
+        # Determine specific source channel
+        # Options: instagram_dm, instagram_like, instagram_comment, instagram_follower
+        source_type = instagram_data.get('source_type', 'dm')
+        source_channel = f"instagram_{source_type}"
+
         lead_data = {
             'name': instagram_data.get('name'),
             'email': instagram_data.get('email'),
             'phone': instagram_data.get('phone'),
             'company': instagram_data.get('company'),
             'notes': notes,
-            'source_channel': 'instagram',
+            'source_channel': source_channel,
             'status': status,
             'score': score,
             'vertical': instagram_data.get('vertical'),

@@ -143,10 +143,8 @@ class InboundLeadHandler:
                 'instagram_verified': profile.get('is_verified'),
                 'instagram_business': profile.get('is_business'),
                 'instagram_category': profile.get('category'),
-                'profile_data': {
-                    'full_profile': profile,
-                    'qualification': qualification
-                }
+                'full_profile': profile,  # For notes generation (URL + bio)
+                'qualification': qualification
             }
 
             # Step 5: Save to Supabase
@@ -154,7 +152,7 @@ class InboundLeadHandler:
             crm_record = self.integration.save_discovered_lead(
                 name=lead_name,
                 email=lead_email,
-                source='instagram_inbound_dm',
+                source='instagram_dm',  # Específico: veio de DM
                 profile_data=profile_data
             )
 
