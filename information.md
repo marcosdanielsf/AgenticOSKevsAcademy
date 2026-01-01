@@ -351,8 +351,49 @@ INSTAGRAM_PASSWORD=
 
 ## 11. PRÓXIMOS PASSOS
 
+### ⚠️ TAREFA PENDENTE: Deploy Railway
+**Status**: Aguardando deploy
+**Branch**: `claude/project-overview-VJwte`
+**PR**: https://github.com/marcosdanielsf/AgenticOSKevsAcademy/compare/main...claude/project-overview-VJwte
+
+**Arquivos prontos para Railway:**
+- `Procfile` - Configurado
+- `railway.toml` - Configurado
+- `requirements.txt` - Completo
+
+**Variáveis de ambiente necessárias:**
+```
+INSTAGRAM_SESSION_ID=258328766%3AEKJ8m0QEivWYrN%3A26%3AAYhUMNhVmKHrhGMaUHaGq8g0VeaX8khoySa6eU2mfw
+SUPABASE_URL=https://bfumywvwubvernvhjehk.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=(pegar em Supabase → Settings → API)
+```
+
+**Depois do deploy, usar no n8n:**
+```
+POST https://[URL-RAILWAY]/webhook/scrape-profile
+Body: {"username": "perfil_instagram"}
+```
+
+### Bruno Fraga API Method (IMPLEMENTADO ✅)
+Método de scraping via API interna do Instagram que extrai dados ocultos:
+- Email real (não placeholder)
+- Telefone
+- WhatsApp linked
+- User ID
+- Facebook ID
+
+**Arquivo**: `implementation/instagram_api_scraper.py`
+**Uso**: Requer INSTAGRAM_SESSION_ID do cookie do navegador
+
+### Source Channel Tracking (IMPLEMENTADO ✅)
+Rastreamento de origem dos leads:
+- `instagram_dm` - Leads de DMs
+- `instagram_like` - Leads de curtidas em posts
+- `instagram_comment` - Leads de comentários
+
 ### Pendente
-- [ ] Integrar com socialfy-platform (GitHub)
+- [ ] **Deploy no Railway** (tarefa salva acima)
+- [ ] Integrar webhook com n8n existente (Mentorfy)
 - [ ] Conectar com AI Factory Dashboard (Prompt Studio)
 - [ ] Adicionar mais agentes para robustez
 - [ ] Implementar testes automatizados
