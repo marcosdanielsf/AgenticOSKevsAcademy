@@ -191,18 +191,37 @@ class SupabaseClient:
         }
 
     def get_tenant(self, tenant_id: str) -> Optional[Dict]:
-        """Get tenant by ID"""
+        """Get tenant by ID or slug"""
         try:
+            # Try by UUID first
             response = requests.get(
                 f"{self.base_url}/tenants",
                 headers=self.headers,
                 params={"id": f"eq.{tenant_id}"}
             )
-            data = response.json()
-            return data[0] if data else None
+            if response.status_code == 200:
+                data = response.json()
+                if data:
+                    return data[0]
+
+            # Fallback to slug
+            response = requests.get(
+                f"{self.base_url}/tenants",
+                headers=self.headers,
+                params={"slug": f"eq.{tenant_id}"}
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return data[0] if data else None
+            return None
         except Exception as e:
             logger.error(f"Error fetching tenant: {e}")
             return None
+
+    def resolve_tenant_id(self, tenant_id: str) -> Optional[str]:
+        """Resolve tenant_id (slug or UUID) to UUID"""
+        tenant = self.get_tenant(tenant_id)
+        return tenant.get("id") if tenant else None
 
     def get_active_persona(self, tenant_id: str) -> Optional[Dict]:
         """Get active persona for tenant"""
@@ -224,15 +243,26 @@ class SupabaseClient:
     def is_known_contact(self, tenant_id: str, username: str) -> bool:
         """Check if username is a known contact"""
         try:
+            # Resolve tenant_id to UUID if needed
+            resolved_id = self.resolve_tenant_id(tenant_id)
+            if not resolved_id:
+                logger.warning(f"Could not resolve tenant_id: {tenant_id}")
+                return False
+
             response = requests.get(
                 f"{self.base_url}/tenant_known_contacts",
                 headers=self.headers,
                 params={
-                    "tenant_id": f"eq.{tenant_id}",
+                    "tenant_id": f"eq.{resolved_id}",
                     "username": f"eq.{username}"
                 }
             )
-            return len(response.json()) > 0
+            # Only count as known if response is successful and has data
+            if response.status_code != 200:
+                logger.error(f"Error checking known contact: {response.text}")
+                return False
+            data = response.json()
+            return isinstance(data, list) and len(data) > 0
         except Exception as e:
             logger.error(f"Error checking known contact: {e}")
             return False
