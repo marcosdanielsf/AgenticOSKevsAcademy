@@ -77,7 +77,7 @@ class InstagramProfileScraperGemini:
         if GEMINI_AVAILABLE and self.api_key:
             genai.configure(api_key=self.api_key)
             # Usar Flash (grátis e rápido) ao invés de Pro
-            self.model = genai.GenerativeModel("gemini-1.5-flash")
+            self.model = genai.GenerativeModel("gemini-2.0-flash")
 
     async def scrape_profile(self, username: str) -> InstagramProfile:
         """

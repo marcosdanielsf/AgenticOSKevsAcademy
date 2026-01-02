@@ -542,7 +542,7 @@ class MessageComposerAgent(BaseAgent):
             api_key = os.getenv("GEMINI_API_KEY")
             if api_key:
                 genai.configure(api_key=api_key)
-                model = genai.GenerativeModel("gemini-1.5-flash")
+                model = genai.GenerativeModel("gemini-2.0-flash")
 
                 prompt = f"""Analise esta bio do Instagram e crie UM gancho de personalização curto (máximo 15 palavras) para começar uma conversa de forma natural.
 
