@@ -877,7 +877,7 @@ async def webhook_inbound_dm(request: InboundDMRequest):
             api_key = os.getenv("GEMINI_API_KEY")
             if api_key:
                 genai.configure(api_key=api_key)
-                model = genai.GenerativeModel("gemini-2.0-flash")
+                model = genai.GenerativeModel("gemini-2.5-flash")
 
                 prompt = f"""Você é um assistente de vendas no Instagram.
 
@@ -1038,7 +1038,7 @@ async def classify_lead(request: ClassifyLeadRequest):
             raise ValueError("GEMINI_API_KEY not configured")
 
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash")
 
         persona_context = ""
         if persona:

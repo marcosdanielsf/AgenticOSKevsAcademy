@@ -410,7 +410,7 @@ class LeadClassifierAgent(BaseAgent):
                 raise ValueError("GEMINI_API_KEY not configured")
 
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-2.0-flash")
+            model = genai.GenerativeModel("gemini-2.5-flash")
 
             persona_context = ""
             if persona:
@@ -615,7 +615,7 @@ class AutoResponderAgent(BaseAgent):
                 }
 
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-2.0-flash")
+            model = genai.GenerativeModel("gemini-2.5-flash")
 
             # Build context
             profile_context = ""
