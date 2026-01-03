@@ -44,7 +44,8 @@ import requests
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-load_dotenv()
+# Load .env but don't override existing env vars (Railway sets them)
+load_dotenv(override=False)
 
 # ============================================
 # CONFIGURATION
