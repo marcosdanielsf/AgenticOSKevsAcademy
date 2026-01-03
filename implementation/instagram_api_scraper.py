@@ -110,6 +110,47 @@ class InstagramAPIScraper:
         self.session = requests.Session()
         logger.info("InstagramAPIScraper inicializado")
 
+    def get_user_by_id(self, user_id: str) -> Optional[Dict]:
+        """
+        Obtém informações do usuário a partir do User ID.
+        Útil quando recebemos apenas o ig_id (igSid) do webhook.
+
+        Args:
+            user_id: O ID numérico do usuário do Instagram
+
+        Returns:
+            Dict com username e outras infos, ou None se não encontrar
+        """
+        try:
+            # Limpar o user_id (pode vir com prefixos)
+            clean_id = str(user_id).split("_")[0] if "_" in str(user_id) else str(user_id)
+
+            # API endpoint para buscar user por ID
+            url = f"{self.BASE_URL}/users/{clean_id}/info/"
+            response = self.session.get(url, headers=self.headers, timeout=15)
+
+            if response.status_code == 200:
+                data = response.json()
+                user = data.get("user", {})
+
+                if user:
+                    logger.info(f"Usuário encontrado via ID {clean_id}: @{user.get('username')}")
+                    return {
+                        "user_id": clean_id,
+                        "username": user.get("username"),
+                        "full_name": user.get("full_name"),
+                        "is_private": user.get("is_private", False),
+                        "is_verified": user.get("is_verified", False),
+                        "profile_pic_url": user.get("profile_pic_url")
+                    }
+
+            logger.warning(f"Não foi possível buscar usuário com ID {clean_id}: {response.status_code}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Erro ao buscar usuário por ID {user_id}: {e}")
+            return None
+
     def get_user_id(self, username: str) -> Optional[str]:
         """
         Obtém o User ID a partir do username.
