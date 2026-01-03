@@ -140,10 +140,11 @@ class CheckInboxRequest(BaseModel):
     limit: int = 20
 
 class WebhookPayload(BaseModel):
-    event: str
-    data: Dict[str, Any]
+    event: Optional[str] = "generic"
+    data: Optional[Dict[str, Any]] = {}
     tenant_id: Optional[str] = None
     timestamp: Optional[str] = None
+    action: Optional[str] = None  # Alias for event (compatibility)
 
 class InboundDMRequest(BaseModel):
     username: str
@@ -1094,7 +1095,7 @@ Responda APENAS em JSON:
             "score": result["score"],
             "ai_reasoning": result["reasoning"],
             "suggested_response": result.get("suggested_response"),
-            "classified_at": datetime.now().isoformat()
+            "source": "dm_received"
         })
 
         return ClassifyLeadResponse(
@@ -1132,31 +1133,33 @@ async def enrich_lead(request: EnrichLeadRequest):
         save_to_db=True
     ))
 
-    if not profile_response.success:
+    if not profile_response.get("success"):
         return {
             "success": False,
             "username": request.username,
-            "error": profile_response.error
+            "error": profile_response.get("error")
         }
 
     # Calculate lead score based on profile
     score = 50  # Base score
 
-    if profile_response.followers_count > 10000:
+    followers_count = profile_response.get("followers_count", 0)
+    if followers_count > 10000:
         score += 10
-    if profile_response.followers_count > 100000:
+    if followers_count > 100000:
         score += 10
 
-    if not profile_response.is_private:
+    if not profile_response.get("is_private"):
         score += 5
 
-    if profile_response.is_verified:
+    if profile_response.get("is_verified"):
         score += 10
 
-    if profile_response.bio:
+    bio = profile_response.get("bio", "")
+    if bio:
         # Keywords that indicate business
         business_keywords = ["ceo", "founder", "empreendedor", "empresa", "negócio", "digital", "marketing"]
-        bio_lower = profile_response.bio.lower()
+        bio_lower = bio.lower()
         for keyword in business_keywords:
             if keyword in bio_lower:
                 score += 5
@@ -1166,14 +1169,14 @@ async def enrich_lead(request: EnrichLeadRequest):
         "success": True,
         "username": request.username,
         "profile": {
-            "full_name": profile_response.full_name,
-            "bio": profile_response.bio,
-            "followers": profile_response.followers_count,
-            "following": profile_response.following_count,
-            "posts": profile_response.posts_count,
-            "is_verified": profile_response.is_verified,
-            "is_private": profile_response.is_private,
-            "category": profile_response.category
+            "full_name": profile_response.get("full_name"),
+            "bio": profile_response.get("bio"),
+            "followers": profile_response.get("followers_count"),
+            "following": profile_response.get("following_count"),
+            "posts": profile_response.get("posts_count"),
+            "is_verified": profile_response.get("is_verified"),
+            "is_private": profile_response.get("is_private"),
+            "category": profile_response.get("category")
         },
         "lead_score": min(score, 100),
         "enriched_at": datetime.now().isoformat()
@@ -1256,7 +1259,11 @@ async def n8n_webhook(payload: WebhookPayload, background_tasks: BackgroundTasks
     Generic webhook endpoint for n8n.
     Routes to appropriate handler based on event type.
     """
-    logger.info(f"Received n8n webhook: {payload.event}")
+    # Use action as fallback for event (compatibility)
+    event = payload.event or payload.action or "generic"
+    data = payload.data or {}
+
+    logger.info(f"Received n8n webhook: {event}")
 
     event_handlers = {
         "new_message": handle_new_message,
@@ -1265,12 +1272,13 @@ async def n8n_webhook(payload: WebhookPayload, background_tasks: BackgroundTasks
         "scheduled_dm": handle_scheduled_dm
     }
 
-    handler = event_handlers.get(payload.event)
+    handler = event_handlers.get(event)
     if handler:
-        background_tasks.add_task(handler, payload.data, payload.tenant_id)
-        return {"status": "processing", "event": payload.event}
+        background_tasks.add_task(handler, data, payload.tenant_id)
+        return {"status": "processing", "event": event}
 
-    return {"status": "unknown_event", "event": payload.event}
+    # For generic/test events, just acknowledge
+    return {"status": "received", "event": event, "data": data}
 
 
 async def handle_new_message(data: Dict, tenant_id: str):
