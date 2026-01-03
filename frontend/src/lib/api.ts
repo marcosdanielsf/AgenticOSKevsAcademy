@@ -1,4 +1,28 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+// Auto-detect API URL based on hostname
+const getApiBase = (): string => {
+  // Server-side rendering or environment variable override
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+
+  // Client-side: detect based on current hostname
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+
+    // Localhost = backend local
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://localhost:8000';
+    }
+
+    // Production domains
+    return 'https://agenticoskevsacademy-production.up.railway.app';
+  }
+
+  // Default fallback (SSR)
+  return 'http://localhost:8000';
+};
+
+const API_BASE = getApiBase();
 
 export interface Agent {
   name: string;
