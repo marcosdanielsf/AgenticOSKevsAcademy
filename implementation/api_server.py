@@ -2032,6 +2032,436 @@ async def list_skills():
         return {"success": False, "error": str(e)}
 
 
+# ============================================
+# MATCH LEAD CONTEXT - Endpoint principal para n8n
+# ============================================
+
+class MatchLeadContextRequest(BaseModel):
+    """Request para match de lead vindo do webhook GHL."""
+    phone: Optional[str] = Field(None, description="Telefone do contato")
+    email: Optional[str] = Field(None, description="Email do contato")
+    ig_id: Optional[str] = Field(None, description="Instagram Session ID (igSid)")
+    ig_handle: Optional[str] = Field(None, description="Instagram handle (@usuario)")
+    ghl_contact_id: Optional[str] = Field(None, description="ID do contato no GHL")
+    location_id: Optional[str] = Field(None, description="ID da location GHL")
+    first_name: Optional[str] = Field(None, description="Primeiro nome do contato")
+
+
+class MatchLeadContextResponse(BaseModel):
+    """Response com contexto completo do lead."""
+    matched: bool
+    source: Optional[str] = None  # agenticos_prospecting, ghl_inbound, unknown
+
+    # Dados do lead
+    lead_data: Optional[Dict[str, Any]] = None
+
+    # Contexto de prospecção
+    prospecting_context: Optional[Dict[str, Any]] = None
+
+    # Histórico de conversas
+    conversation_history: Optional[List[Dict[str, Any]]] = None
+
+    # Placeholders prontos para o prompt
+    placeholders: Optional[Dict[str, str]] = None
+
+    # Ação necessária se não encontrou
+    action_required: Optional[str] = None  # scrape_profile, create_lead, none
+    scrape_target: Optional[Dict[str, Any]] = None
+
+
+def normalize_phone(phone: str) -> str:
+    """Normaliza telefone para formato internacional."""
+    import re
+    if not phone:
+        return ""
+    # Remove tudo que não é dígito
+    digits = re.sub(r'\D', '', phone)
+    # Se começa com 55 e tem 12-13 dígitos, já está ok
+    if digits.startswith('55') and len(digits) >= 12:
+        return f"+{digits}"
+    # Se tem 11 dígitos (DDD + celular BR)
+    if len(digits) == 11:
+        return f"+55{digits}"
+    # Se tem 10 dígitos (DDD + fixo BR)
+    if len(digits) == 10:
+        return f"+55{digits}"
+    # Retorna como está
+    return f"+{digits}" if digits else ""
+
+
+def normalize_instagram(handle: str) -> str:
+    """Normaliza handle do Instagram."""
+    if not handle:
+        return ""
+    # Remove @ se tiver
+    handle = handle.lstrip("@").lower().strip()
+    # Remove URL se for
+    if "instagram.com" in handle:
+        handle = handle.split("/")[-1].split("?")[0]
+    return f"@{handle}"
+
+
+@app.post("/api/match-lead-context", response_model=MatchLeadContextResponse)
+async def match_lead_context(request: MatchLeadContextRequest):
+    """
+    Endpoint principal para n8n buscar contexto do lead.
+
+    Recebe dados do webhook GHL e tenta encontrar o lead no AgenticOS.
+    Retorna dados enriquecidos, histórico e placeholders prontos para o prompt.
+
+    Fluxo:
+    1. Tenta match por ghl_contact_id (se já sincronizado)
+    2. Tenta match por phone (normalizado)
+    3. Tenta match por email
+    4. Tenta match por ig_handle ou ig_id
+    5. Se não encontrar, retorna action_required = scrape_profile
+    """
+    logger.info(f"Match Lead Context: phone={request.phone}, email={request.email}, ig_id={request.ig_id}")
+
+    try:
+        lead = None
+        enriched = {}
+        match_source = "unknown"
+
+        # Normalizar identificadores
+        phone_normalized = normalize_phone(request.phone) if request.phone else None
+        email_normalized = request.email.lower().strip() if request.email else None
+        ig_handle_normalized = normalize_instagram(request.ig_handle) if request.ig_handle else None
+
+        # ============================================
+        # TENTATIVA 1: Match por ghl_contact_id
+        # ============================================
+        if request.ghl_contact_id:
+            try:
+                response = requests.get(
+                    f"{db.base_url}/socialfy_leads",
+                    headers=db.headers,
+                    params={
+                        "ghl_contact_id": f"eq.{request.ghl_contact_id}",
+                        "limit": 1
+                    }
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if data:
+                        lead = data[0]
+                        match_source = "ghl_synced"
+                        logger.info(f"Match por ghl_contact_id: {request.ghl_contact_id}")
+            except Exception as e:
+                logger.warning(f"Erro match ghl_contact_id: {e}")
+
+        # ============================================
+        # TENTATIVA 2: Match por phone
+        # ============================================
+        if not lead and phone_normalized:
+            try:
+                # Tentar em socialfy_leads
+                response = requests.get(
+                    f"{db.base_url}/socialfy_leads",
+                    headers=db.headers,
+                    params={
+                        "phone": f"eq.{phone_normalized}",
+                        "limit": 1
+                    }
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if data:
+                        lead = data[0]
+                        match_source = "agenticos_prospecting"
+                        logger.info(f"Match por phone: {phone_normalized}")
+
+                # Fallback: crm_leads
+                if not lead:
+                    response = requests.get(
+                        f"{db.base_url}/crm_leads",
+                        headers=db.headers,
+                        params={
+                            "phone": f"eq.{phone_normalized}",
+                            "limit": 1
+                        }
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data:
+                            lead = data[0]
+                            match_source = "agenticos_crm"
+                            logger.info(f"Match por phone (crm_leads): {phone_normalized}")
+            except Exception as e:
+                logger.warning(f"Erro match phone: {e}")
+
+        # ============================================
+        # TENTATIVA 3: Match por email
+        # ============================================
+        if not lead and email_normalized:
+            try:
+                response = requests.get(
+                    f"{db.base_url}/socialfy_leads",
+                    headers=db.headers,
+                    params={
+                        "email": f"eq.{email_normalized}",
+                        "limit": 1
+                    }
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if data:
+                        lead = data[0]
+                        match_source = "agenticos_prospecting"
+                        logger.info(f"Match por email: {email_normalized}")
+            except Exception as e:
+                logger.warning(f"Erro match email: {e}")
+
+        # ============================================
+        # TENTATIVA 4: Match por instagram_handle
+        # ============================================
+        if not lead and ig_handle_normalized:
+            try:
+                response = requests.get(
+                    f"{db.base_url}/socialfy_leads",
+                    headers=db.headers,
+                    params={
+                        "instagram_handle": f"eq.{ig_handle_normalized}",
+                        "limit": 1
+                    }
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if data:
+                        lead = data[0]
+                        match_source = "agenticos_prospecting"
+                        logger.info(f"Match por ig_handle: {ig_handle_normalized}")
+            except Exception as e:
+                logger.warning(f"Erro match ig_handle: {e}")
+
+        # ============================================
+        # TENTATIVA 5: Match por agentic_instagram_leads (scrapes)
+        # ============================================
+        if not lead and ig_handle_normalized:
+            try:
+                # Remove @ para busca
+                handle_clean = ig_handle_normalized.lstrip("@")
+                response = requests.get(
+                    f"{db.base_url}/agentic_instagram_leads",
+                    headers=db.headers,
+                    params={
+                        "username": f"eq.{handle_clean}",
+                        "limit": 1
+                    }
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if data:
+                        # Converter formato
+                        ig_lead = data[0]
+                        lead = {
+                            "id": ig_lead.get("id"),
+                            "name": ig_lead.get("full_name"),
+                            "instagram_handle": f"@{ig_lead.get('username')}",
+                            "source": "instagram_scrape",
+                            "ig_followers": ig_lead.get("followers"),
+                            "ig_bio": ig_lead.get("bio"),
+                            "created_at": ig_lead.get("created_at")
+                        }
+                        match_source = "instagram_scrape"
+                        logger.info(f"Match por agentic_instagram_leads: {handle_clean}")
+            except Exception as e:
+                logger.warning(f"Erro match agentic_instagram_leads: {e}")
+
+        # ============================================
+        # SE NÃO ENCONTROU - Retornar ação necessária
+        # ============================================
+        if not lead:
+            logger.info(f"Lead não encontrado. Retornando action_required=scrape_profile")
+            return MatchLeadContextResponse(
+                matched=False,
+                source="unknown",
+                action_required="scrape_profile",
+                scrape_target={
+                    "phone": phone_normalized,
+                    "email": email_normalized,
+                    "ig_id": request.ig_id,
+                    "ig_handle": ig_handle_normalized,
+                    "first_name": request.first_name
+                }
+            )
+
+        # ============================================
+        # BUSCAR DADOS ENRIQUECIDOS
+        # ============================================
+        lead_id = lead.get("id")
+        if lead_id:
+            try:
+                response = requests.get(
+                    f"{db.base_url}/enriched_lead_data",
+                    headers=db.headers,
+                    params={
+                        "lead_id": f"eq.{lead_id}",
+                        "order": "created_at.desc"
+                    }
+                )
+                if response.status_code == 200:
+                    enriched_list = response.json()
+
+                    # Consolidar dados de múltiplas fontes
+                    for e in enriched_list:
+                        if not enriched.get("cargo") and e.get("cargo"):
+                            enriched["cargo"] = e["cargo"]
+                        if not enriched.get("empresa") and e.get("empresa"):
+                            enriched["empresa"] = e["empresa"]
+                        if not enriched.get("setor") and e.get("setor"):
+                            enriched["setor"] = e["setor"]
+                        if not enriched.get("porte") and e.get("porte"):
+                            enriched["porte"] = e["porte"]
+                        if not enriched.get("ig_followers") and e.get("ig_followers"):
+                            enriched["ig_followers"] = e["ig_followers"]
+                        if not enriched.get("ig_bio") and e.get("ig_bio"):
+                            enriched["ig_bio"] = e["ig_bio"]
+            except Exception as e:
+                logger.warning(f"Erro buscando enriched_data: {e}")
+
+        # ============================================
+        # BUSCAR HISTÓRICO DE CONVERSAS
+        # ============================================
+        conversation_history = []
+        if lead_id:
+            try:
+                response = requests.get(
+                    f"{db.base_url}/agent_conversations",
+                    headers=db.headers,
+                    params={
+                        "or": f"(lead_id.eq.{lead_id},contact_id.eq.{lead_id})",
+                        "order": "created_at.desc",
+                        "limit": 10
+                    }
+                )
+                if response.status_code == 200:
+                    convs = response.json()
+                    for c in convs:
+                        conversation_history.append({
+                            "role": c.get("role", "unknown"),
+                            "content": c.get("message") or c.get("content"),
+                            "at": c.get("created_at"),
+                            "channel": c.get("channel")
+                        })
+            except Exception as e:
+                logger.warning(f"Erro buscando histórico: {e}")
+
+        # ============================================
+        # DETERMINAR SE FOI PROSPECTADO
+        # ============================================
+        source = lead.get("source", "")
+        was_prospected = any([
+            source.startswith("outbound"),
+            source.startswith("instagram_scrape"),
+            source.startswith("linkedin_scrape"),
+            lead.get("outreach_sent_at") is not None
+        ])
+
+        # ============================================
+        # MONTAR LEAD_DATA
+        # ============================================
+        lead_data = {
+            "id": lead.get("id"),
+            "name": lead.get("name") or lead.get("full_name") or request.first_name,
+            "phone": lead.get("phone"),
+            "email": lead.get("email"),
+            "instagram_handle": lead.get("instagram_handle"),
+            "cargo": enriched.get("cargo") or lead.get("cargo"),
+            "empresa": enriched.get("empresa") or lead.get("empresa"),
+            "setor": enriched.get("setor") or lead.get("setor"),
+            "porte": enriched.get("porte") or lead.get("porte"),
+            "icp_score": lead.get("icp_score"),
+            "icp_tier": lead.get("icp_tier"),
+            "ig_followers": enriched.get("ig_followers") or lead.get("ig_followers"),
+            "ig_bio": enriched.get("ig_bio") or lead.get("ig_bio"),
+            "ig_engagement": lead.get("ig_engagement"),
+            "source": lead.get("source"),
+            "status": lead.get("status"),
+            "ghl_contact_id": lead.get("ghl_contact_id"),
+            "location_id": lead.get("location_id"),
+            "created_at": lead.get("created_at")
+        }
+        # Remover None
+        lead_data = {k: v for k, v in lead_data.items() if v is not None}
+
+        # ============================================
+        # MONTAR PROSPECTING_CONTEXT
+        # ============================================
+        prospecting_context = {
+            "was_prospected": was_prospected,
+            "prospected_at": lead.get("outreach_sent_at"),
+            "outreach_message": lead.get("last_outreach_message"),
+            "outreach_channel": lead.get("source_channel") or (
+                "instagram_dm" if "instagram" in str(lead.get("source", "")).lower() else None
+            )
+        }
+
+        # ============================================
+        # MONTAR PLACEHOLDERS PARA O PROMPT
+        # ============================================
+        nome = lead_data.get("name", "").split()[0] if lead_data.get("name") else request.first_name or ""
+
+        # Contexto de prospecção formatado
+        contexto_prospeccao = ""
+        if was_prospected:
+            data_prospeccao = lead.get("outreach_sent_at", "data desconhecida")
+            if isinstance(data_prospeccao, str) and "T" in data_prospeccao:
+                data_prospeccao = data_prospeccao.split("T")[0]
+            contexto_prospeccao = f"Lead prospectado em {data_prospeccao}"
+            if prospecting_context.get("outreach_channel"):
+                contexto_prospeccao += f" via {prospecting_context['outreach_channel']}"
+            if lead_data.get("cargo") and lead_data.get("empresa"):
+                contexto_prospeccao += f". Identificado como {lead_data['cargo']} na {lead_data['empresa']}."
+            if lead_data.get("icp_tier"):
+                contexto_prospeccao += f" Classificado como {lead_data['icp_tier']}."
+
+        placeholders = {
+            "{{nome}}": nome,
+            "{{primeiro_nome}}": nome,
+            "{{nome_completo}}": lead_data.get("name", ""),
+            "{{cargo}}": lead_data.get("cargo", ""),
+            "{{empresa}}": lead_data.get("empresa", ""),
+            "{{setor}}": lead_data.get("setor", ""),
+            "{{porte}}": lead_data.get("porte", ""),
+            "{{icp_score}}": str(lead_data.get("icp_score", "")),
+            "{{icp_tier}}": lead_data.get("icp_tier", ""),
+            "{{ig_followers}}": str(lead_data.get("ig_followers", "")),
+            "{{ig_bio}}": lead_data.get("ig_bio", ""),
+            "{{contexto_prospeccao}}": contexto_prospeccao,
+            "{{foi_prospectado}}": "sim" if was_prospected else "não",
+            "{{fonte}}": lead_data.get("source", "")
+        }
+        # Remover placeholders vazios
+        placeholders = {k: v for k, v in placeholders.items() if v}
+
+        logger.info(f"Match encontrado! source={match_source}, lead_id={lead_data.get('id')}")
+
+        return MatchLeadContextResponse(
+            matched=True,
+            source=match_source,
+            lead_data=lead_data,
+            prospecting_context=prospecting_context,
+            conversation_history=conversation_history if conversation_history else None,
+            placeholders=placeholders,
+            action_required="none"
+        )
+
+    except Exception as e:
+        logger.error(f"Match Lead Context error: {e}", exc_info=True)
+        return MatchLeadContextResponse(
+            matched=False,
+            source="error",
+            action_required="scrape_profile",
+            scrape_target={
+                "phone": request.phone,
+                "email": request.email,
+                "ig_id": request.ig_id,
+                "error": str(e)
+            }
+        )
+
+
 @app.get("/api/health")
 async def health_check():
     """
