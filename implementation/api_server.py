@@ -2719,7 +2719,7 @@ async def analyze_conversation_context(request: ConversationContextRequest):
         # ============================================
         # REGRA 1: Tags de prospecção = SEMPRE ativar
         # ============================================
-        prospecting_tags = ["prospectado", "abordado", "social_selling", "outbound", "lead_qualificado", "ia-ativa"]
+        prospecting_tags = ["prospectado", "abordado", "social_selling", "outbound", "lead_qualificado", "ia-ativa", "ia-call", "ia_ativa", "ativar_ia"]
         has_prospecting_tag = any(tag in tags_lower for tag in prospecting_tags)
 
         if has_prospecting_tag:
