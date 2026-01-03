@@ -2463,6 +2463,218 @@ async def match_lead_context(request: MatchLeadContextRequest):
         )
 
 
+# ============================================
+# AUTO ENRICH LEAD - Scrape automático quando não encontrado
+# ============================================
+
+class AutoEnrichRequest(BaseModel):
+    """Request para enriquecimento automático de lead"""
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    ig_id: Optional[str] = None
+    ig_handle: Optional[str] = None
+    ghl_contact_id: Optional[str] = None
+    location_id: Optional[str] = None
+    first_name: Optional[str] = None
+    source_channel: Optional[str] = "unknown"
+
+class AutoEnrichResponse(BaseModel):
+    """Response do enriquecimento automático"""
+    success: bool
+    action_taken: str  # "matched", "scraped", "skipped", "error"
+    lead_data: Optional[Dict[str, Any]] = None
+    placeholders: Optional[Dict[str, str]] = None
+    scrape_result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+@app.post("/api/auto-enrich-lead", response_model=AutoEnrichResponse)
+async def auto_enrich_lead(request: AutoEnrichRequest):
+    """
+    Enriquecimento automático de lead.
+
+    1. Primeiro tenta match no AgenticOS (via match-lead-context)
+    2. Se não encontrar E tiver ig_handle → faz scrape automático
+    3. Salva no banco e retorna dados enriquecidos
+
+    Chamado pelo n8n quando matched=false no Match Lead Context.
+    """
+    logger.info(f"Auto Enrich Lead: ig_handle={request.ig_handle}, phone={request.phone}")
+
+    try:
+        # ============================================
+        # PASSO 1: Verificar se já existe no AgenticOS
+        # ============================================
+        match_request = MatchLeadContextRequest(
+            phone=request.phone,
+            email=request.email,
+            ig_id=request.ig_id,
+            ig_handle=request.ig_handle,
+            ghl_contact_id=request.ghl_contact_id,
+            location_id=request.location_id,
+            first_name=request.first_name
+        )
+
+        match_result = await match_lead_context(match_request)
+
+        if match_result.matched:
+            logger.info(f"Lead já existe no AgenticOS: {match_result.lead_data.get('id') if match_result.lead_data else 'N/A'}")
+            return AutoEnrichResponse(
+                success=True,
+                action_taken="matched",
+                lead_data=match_result.lead_data,
+                placeholders=match_result.placeholders
+            )
+
+        # ============================================
+        # PASSO 2: Se tiver ig_handle, fazer scrape
+        # ============================================
+        ig_handle = request.ig_handle
+
+        # Tentar extrair do ig_id se não tiver handle
+        if not ig_handle and request.ig_id:
+            # Tentar buscar username via API do Instagram
+            try:
+                from instagram_api_scraper import InstagramAPIScraper
+                scraper = InstagramAPIScraper()
+                user_info = scraper.get_user_by_id(request.ig_id)
+                if user_info and user_info.get("username"):
+                    ig_handle = user_info.get("username")
+                    logger.info(f"Username encontrado via ig_id: @{ig_handle}")
+            except Exception as e:
+                logger.warning(f"Não foi possível buscar username via ig_id: {e}")
+
+        if not ig_handle:
+            logger.info("Sem ig_handle para fazer scrape. Pulando enriquecimento.")
+            return AutoEnrichResponse(
+                success=True,
+                action_taken="skipped",
+                error="Sem ig_handle disponível para scrape"
+            )
+
+        # Normalizar handle
+        ig_handle = ig_handle.lstrip("@").lower()
+
+        logger.info(f"Iniciando scrape do perfil: @{ig_handle}")
+
+        # ============================================
+        # PASSO 3: Fazer scrape do perfil
+        # ============================================
+        try:
+            from instagram_api_scraper import InstagramAPIScraper
+            from supabase_integration import SocialfyAgentIntegration
+
+            scraper = InstagramAPIScraper()
+            profile = scraper.get_profile(ig_handle)
+
+            if not profile.get("success"):
+                logger.warning(f"Falha no scrape de @{ig_handle}: {profile.get('error')}")
+                return AutoEnrichResponse(
+                    success=False,
+                    action_taken="error",
+                    error=f"Scrape falhou: {profile.get('error')}"
+                )
+
+            # Calcular score
+            score_data = scraper.calculate_lead_score(profile)
+
+            # ============================================
+            # PASSO 4: Salvar no banco
+            # ============================================
+            integration = SocialfyAgentIntegration()
+
+            lead_name = profile.get("full_name") or request.first_name or ig_handle
+            lead_email = request.email or profile.get("email") or f"{ig_handle}@instagram.lead"
+
+            saved_lead = integration.save_discovered_lead(
+                name=lead_name,
+                email=lead_email,
+                source=request.source_channel or "inbound_dm",
+                profile_data={
+                    "username": ig_handle,
+                    "instagram_handle": f"@{ig_handle}",
+                    "bio": profile.get("bio"),
+                    "followers_count": profile.get("followers_count"),
+                    "following_count": profile.get("following_count"),
+                    "is_business": profile.get("is_business"),
+                    "is_verified": profile.get("is_verified"),
+                    "score": score_data.get("score", 0),
+                    "classification": score_data.get("classification", "LEAD_COLD"),
+                    "phone": request.phone or profile.get("phone"),
+                    "company": profile.get("category"),
+                    "ghl_contact_id": request.ghl_contact_id,
+                    "location_id": request.location_id
+                }
+            )
+
+            logger.info(f"Lead salvo com sucesso: @{ig_handle}")
+
+            # ============================================
+            # PASSO 5: Montar resposta com placeholders
+            # ============================================
+            lead_data = {
+                "id": saved_lead.get("id") if saved_lead else None,
+                "name": lead_name,
+                "instagram_handle": f"@{ig_handle}",
+                "ig_followers": profile.get("followers_count", 0),
+                "ig_bio": profile.get("bio", ""),
+                "icp_score": score_data.get("score", 0),
+                "icp_tier": score_data.get("classification", "LEAD_COLD"),
+                "source": request.source_channel or "inbound_dm",
+                "is_business": profile.get("is_business", False),
+                "is_verified": profile.get("is_verified", False),
+                "category": profile.get("category")
+            }
+
+            primeiro_nome = lead_name.split()[0] if lead_name else ig_handle
+
+            placeholders = {
+                "{{nome}}": primeiro_nome,
+                "{{primeiro_nome}}": primeiro_nome,
+                "{{nome_completo}}": lead_name,
+                "{{ig_handle}}": f"@{ig_handle}",
+                "{{ig_followers}}": str(profile.get("followers_count", 0)),
+                "{{ig_bio}}": profile.get("bio", ""),
+                "{{icp_score}}": str(score_data.get("score", 0)),
+                "{{icp_tier}}": score_data.get("classification", "LEAD_COLD"),
+                "{{fonte}}": request.source_channel or "inbound_dm",
+                "{{categoria}}": profile.get("category", ""),
+                "{{foi_prospectado}}": "não",
+                "{{contexto_prospeccao}}": f"Novo lead via {request.source_channel or 'Instagram'}. Perfil: {profile.get('followers_count', 0)} seguidores. Bio: {(profile.get('bio', '') or '')[:100]}"
+            }
+
+            # Remover placeholders vazios
+            placeholders = {k: v for k, v in placeholders.items() if v}
+
+            return AutoEnrichResponse(
+                success=True,
+                action_taken="scraped",
+                lead_data=lead_data,
+                placeholders=placeholders,
+                scrape_result={
+                    "username": ig_handle,
+                    "followers": profile.get("followers_count"),
+                    "score": score_data.get("score"),
+                    "classification": score_data.get("classification")
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"Erro no scrape/save: {e}", exc_info=True)
+            return AutoEnrichResponse(
+                success=False,
+                action_taken="error",
+                error=str(e)
+            )
+
+    except Exception as e:
+        logger.error(f"Auto Enrich error: {e}", exc_info=True)
+        return AutoEnrichResponse(
+            success=False,
+            action_taken="error",
+            error=str(e)
+        )
+
+
 @app.get("/api/health")
 async def health_check():
     """
