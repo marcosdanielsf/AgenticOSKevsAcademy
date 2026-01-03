@@ -1,0 +1,38 @@
+[
+  {
+    "status": "PASS",
+    "endpoint": "/api/health",
+    "message": "API saud\u00e1vel - version: fase-0",
+    "timestamp": "2026-01-03T00:28:06.596948"
+  },
+  {
+    "status": "PASS",
+    "endpoint": "/api/skills",
+    "message": "Encontradas 5 skills",
+    "timestamp": "2026-01-03T00:28:06.598868"
+  },
+  {
+    "status": "WARN",
+    "endpoint": "/api/get-lead-context",
+    "message": "Resposta: {'found': True, 'lead_id': None, 'cargo': None, 'empresa': None, 'setor': None, 'porte': None, 'icp_score': None, 'icp_tier': None, 'ig_followers': None, 'ig_engagement': None, 'was_prospected': False, 'prospected_at': None, 'context_string': 'CONTEXTO DO LEAD:'}",
+    "timestamp": "2026-01-03T00:28:07.171601"
+  },
+  {
+    "status": "WARN",
+    "endpoint": "/api/sync-lead",
+    "message": "Resposta: {'success': True, 'skill': 'sync_lead', 'data': {'synced': False, 'error': 'Lead nao encontrado no AgenticOS'}, 'elapsed_seconds': 0.215739}",
+    "timestamp": "2026-01-03T00:28:07.390374"
+  },
+  {
+    "status": "WARN",
+    "endpoint": "/api/update-ghl-contact",
+    "message": "Resposta: {'success': True, 'skill': 'update_ghl_contact', 'data': {'updated': False, 'error': 'GHL_API_KEY nao configurada'}, 'elapsed_seconds': 7.9e-05}",
+    "timestamp": "2026-01-03T00:28:07.392844"
+  },
+  {
+    "status": "WARN",
+    "endpoint": "/api/ensure-ghl-fields/test_location",
+    "message": "Resposta: {'success': True, 'skill': 'ensure_ghl_custom_fields', 'data': {'error': 'GHL_API_KEY nao configurada'}, 'elapsed_seconds': 5.3e-05}",
+    "timestamp": "2026-01-03T00:28:07.394700"
+  }
+]

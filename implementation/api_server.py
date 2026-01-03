@@ -534,6 +534,18 @@ async def verify_api_key(x_api_key: str = Header(None)):
 # HEALTH CHECK
 # ============================================
 
+@app.get("/debug/env")
+async def debug_env():
+    """Debug endpoint to check environment variables (masked)"""
+    return {
+        "SUPABASE_URL": SUPABASE_URL[:30] + "..." if SUPABASE_URL else None,
+        "SUPABASE_KEY": "***" + SUPABASE_KEY[-10:] if SUPABASE_KEY else None,
+        "OPENAI_API_KEY": "***" + OPENAI_API_KEY[-10:] if OPENAI_API_KEY else None,
+        "openai_configured": bool(OPENAI_API_KEY),
+        "supabase_configured": bool(SUPABASE_URL and SUPABASE_KEY),
+    }
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint with full system status for dashboard"""
