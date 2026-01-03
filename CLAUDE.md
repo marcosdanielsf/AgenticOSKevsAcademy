@@ -383,3 +383,233 @@ End-to-end lead processing workflow:
 Use debug scripts to troubleshoot API integrations:
 - `debug_instantly_response.py`: Instantly.ai API response analysis
 - `test_*.py` files: Individual component testing
+
+---
+
+## 🚀 RAILWAY DEPLOYMENT (PRODUÇÃO)
+
+### URL de Produção
+```
+https://agenticoskevsacademy-production.up.railway.app
+```
+
+### Endpoints Disponíveis
+| Endpoint | Método | Descrição |
+|----------|--------|-----------|
+| `/health` | GET | Health check do sistema |
+| `/docs` | GET | Documentação Swagger interativa |
+| `/webhook/classify-lead` | POST | Classifica lead com IA (Gemini) |
+| `/webhook/inbound-dm` | POST | Processa DM + scrape perfil + salva Supabase |
+| `/webhook/scrape-profile` | POST | Scrape perfil Instagram via API |
+| `/webhook/send-dm` | POST | Envia DM para usuário |
+| `/api/leads` | GET | Lista leads do banco |
+| `/api/stats` | GET | Estatísticas gerais |
+
+### Variáveis de Ambiente (Railway)
+```
+SUPABASE_URL=https://bfumywvwubvernvhjehk.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<sua_chave>
+GEMINI_API_KEY=<sua_chave>
+INSTAGRAM_SESSION_ID=<seu_session_id>
+```
+
+### Testar API
+```bash
+# Health check
+curl https://agenticoskevsacademy-production.up.railway.app/health
+
+# Classificar lead com IA
+curl -X POST "https://agenticoskevsacademy-production.up.railway.app/webhook/classify-lead" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "lead_teste", "message": "Quero saber mais", "tenant_id": "cliente1"}'
+```
+
+### Arquivos de Deploy
+- `Procfile`: Define comando de start
+- `railway.toml`: Configuração do Railway (nixpacks, healthcheck)
+
+---
+
+## 📱 SOCIALFY - INSTAGRAM AUTOMATION
+
+### Instagram API Scraping (Método Bruno Fraga)
+Usa a API interna do Instagram com Session ID - mais rápido e confiável que Selenium.
+
+```bash
+# Scrape perfil via API
+python3 -c "
+import requests
+SESSION_ID = 'seu_session_id'
+headers = {
+    'User-Agent': 'Instagram 275.0.0.27.98 Android',
+    'Cookie': f'sessionid={SESSION_ID}',
+    'X-IG-App-ID': '936619743392459'
+}
+r = requests.get('https://i.instagram.com/api/v1/users/web_profile_info/?username=TARGET', headers=headers)
+print(r.json()['data']['user'])
+"
+```
+
+### Playwright DM Automation
+Envia DMs reais abrindo o navegador:
+
+```bash
+# Enviar DM via Playwright (visual)
+python3 demo_flavia_envia.py
+```
+
+**Arquivo:** `demo_flavia_envia.py` - Script que:
+1. Abre Chrome visível
+2. Carrega sessão do Instagram
+3. Visita perfil do lead
+4. Clica em "Message"
+5. Digita mensagem personalizada
+6. Envia a DM
+
+### Scripts de Demo (Client Presentations)
+```bash
+# Demo visual que mostra processo ao vivo
+python3 demo_playwright_real.py
+
+# Demo para múltiplos perfis
+python3 demo_flavia_envia.py
+```
+
+### Source Channel Tracking
+Rastreia origem dos leads no campo `source_channel`:
+- `instagram_dm` - Lead veio de DM
+- `instagram_like` - Lead curtiu um post
+- `instagram_comment` - Lead comentou em post
+
+---
+
+## 🤖 AI LEAD CLASSIFICATION
+
+### Classificação com Gemini
+A API usa Gemini 1.5 Flash para classificar leads automaticamente:
+
+**Categorias:**
+- `LEAD_HOT`: Interesse claro em comprar/contratar
+- `LEAD_WARM`: Interesse moderado, engajamento positivo
+- `LEAD_COLD`: Primeira interação, sem interesse claro
+- `PESSOAL`: Mensagem pessoal (amigo, família)
+- `SPAM`: Propaganda, bot, irrelevante
+
+**Resposta da API:**
+```json
+{
+  "success": true,
+  "username": "lead_teste",
+  "classification": "LEAD_HOT",
+  "score": 85,
+  "reasoning": "Demonstrou interesse claro em saber preços",
+  "suggested_response": "Oi! Que legal seu interesse..."
+}
+```
+
+---
+
+## 🔗 INTEGRAÇÃO N8N + GHL
+
+### Fluxo Completo
+```
+Instagram (DM/Comentário)
+        ↓
+    [Webhook]
+        ↓
+      [n8n]
+        ↓
+[POST Railway /webhook/classify-lead]
+        ↓
+   IA classifica
+        ↓
+[IF: LEAD_HOT ou LEAD_WARM]
+        ↓
+[Atualiza GHL com campos:]
+  - ativar_ia: "sim"
+  - objetivo_lead: classification
+  - informacoes_ia: bio + seguidores
+  - resposta_ia: suggested_response
+  - fup_counter: 0
+```
+
+### Campos GHL Preenchidos pela IA
+| Campo GHL | Dado da API |
+|-----------|-------------|
+| `Especialista Motive` | tenant_id |
+| `Objetivo do lead` | classification |
+| `FUP_counter` | 0 (inicial) |
+| `ativar_ia` | "sim" se HOT/WARM |
+| `Informações para IA` | profile.bio + contexto |
+| `Resposta IA` | suggested_response |
+
+---
+
+## 📊 SUPABASE - TABELAS
+
+### crm_leads
+Tabela principal de leads:
+- `name`, `email`, `phone`, `company`
+- `source_channel`: instagram_dm, instagram_like, instagram_comment
+- `status`: cold, warm, hot
+- `score`: 0-100
+- `vertical`: segmento do lead
+
+### Constraints Importantes
+- ❌ Coluna `notes` NÃO EXISTE na tabela crm_leads
+- ✅ Usar `source_channel` para rastrear origem
+- ✅ Bio do Instagram vai em dados do perfil, não no lead
+
+---
+
+## ⚠️ CONSTRAINTS E APRENDIZADOS
+
+### Railway Build - Módulos Built-in
+**PROBLEMA:** Railway falha ao instalar módulos built-in do Python 3
+```
+❌ concurrent.futures, asyncio, asyncio-compat
+ERROR: No matching distribution found for concurrent.futures
+```
+**SOLUÇÃO:** NÃO incluir no requirements.txt:
+- `concurrent.futures` (built-in Python 3.2+)
+- `asyncio` (built-in Python 3.4+)
+- `asyncio-compat` (desnecessário)
+
+### Instagram API Rate Limits
+- Máximo ~200 requests/hora por sessão
+- Usar delays entre requests (1-3 segundos)
+- Rotacionar Session IDs se necessário
+
+### Playwright no Railway
+- ❌ Playwright NÃO funciona no Railway (falta browser)
+- ✅ Usar Instagram API (Bruno Fraga) para scraping no servidor
+- ✅ Playwright funciona apenas LOCAL para demos
+
+---
+
+## 🎯 COMANDOS RÁPIDOS
+
+### Testar API Railway
+```bash
+curl https://agenticoskevsacademy-production.up.railway.app/health
+```
+
+### Classificar Lead
+```bash
+curl -X POST "https://agenticoskevsacademy-production.up.railway.app/webhook/classify-lead" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "teste", "message": "Quero saber o preço", "tenant_id": "meu_tenant"}'
+```
+
+### Demo Playwright Local
+```bash
+cd ~/AgenticOSKevsAcademy
+python3 demo_flavia_envia.py
+```
+
+### Scrape Perfil via API
+```bash
+curl -X POST "https://agenticoskevsacademy-production.up.railway.app/webhook/scrape-profile" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "flavialealbeauty", "save_to_db": true}'
+```
