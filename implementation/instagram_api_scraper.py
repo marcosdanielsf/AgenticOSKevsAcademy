@@ -166,7 +166,29 @@ class InstagramAPIScraper:
         }
 
         try:
-            # Método 1: Web Profile Info (mais dados)
+            # Método 1: API Mobile (i.instagram.com) - mais confiável
+            url = f"{self.BASE_URL}/users/web_profile_info/?username={username}"
+            response = self.session.get(url, headers=self.headers, timeout=15)
+
+            if response.status_code == 200:
+                data = response.json()
+                user = data.get("data", {}).get("user", {})
+
+                if user:
+                    result.update(self._parse_web_profile(user))
+                    result["success"] = True
+                    result["method"] = "mobile_api"
+
+                    # Tentar obter dados adicionais via API mobile
+                    user_id = result.get("user_id")
+                    if user_id:
+                        extra_data = self._get_mobile_profile(user_id)
+                        if extra_data:
+                            result.update(extra_data)
+
+                    return result
+
+            # Método 2: Web Profile Info (fallback)
             url = f"{self.WEB_URL}/api/v1/users/web_profile_info/?username={username}"
             response = self.session.get(url, headers=self.web_headers, timeout=15)
 
@@ -178,17 +200,9 @@ class InstagramAPIScraper:
                     result.update(self._parse_web_profile(user))
                     result["success"] = True
                     result["method"] = "web_profile_info"
-
-                    # Tentar obter dados adicionais via API mobile
-                    user_id = result.get("user_id")
-                    if user_id:
-                        extra_data = self._get_mobile_profile(user_id)
-                        if extra_data:
-                            result.update(extra_data)
-
                     return result
 
-            # Método 2: GraphQL (fallback)
+            # Método 3: GraphQL (fallback)
             profile_data = self._get_graphql_profile(username)
             if profile_data:
                 result.update(profile_data)
@@ -196,7 +210,7 @@ class InstagramAPIScraper:
                 result["method"] = "graphql"
                 return result
 
-            # Método 3: Página pública (último recurso)
+            # Método 4: Página pública (último recurso)
             public_data = self._get_public_profile(username)
             if public_data:
                 result.update(public_data)

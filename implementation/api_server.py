@@ -1442,8 +1442,7 @@ async def get_classified_leads(
     try:
         params = {
             "limit": limit,
-            "order": "score.desc",
-            "score": f"gte.{min_score}"
+            "order": "created_at.desc"  # Use created_at (score column may not exist)
         }
 
         if classification:
@@ -1457,10 +1456,16 @@ async def get_classified_leads(
             params=params
         )
 
+        leads = response.json()
+
+        # Filter by min_score in Python (in case column doesn't exist in DB)
+        if min_score > 0 and leads:
+            leads = [l for l in leads if l.get("score", 0) >= min_score]
+
         return {
             "success": True,
-            "leads": response.json(),
-            "count": len(response.json())
+            "leads": leads,
+            "count": len(leads)
         }
 
     except Exception as e:
