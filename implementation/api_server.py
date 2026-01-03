@@ -1538,7 +1538,7 @@ def get_openai_embedding(text: str) -> Optional[List[float]]:
 async def rag_ingest(request: RAGIngestRequest):
     """
     Ingest knowledge into the RAG system (Segundo Cérebro).
-    Generates embedding and saves to knowledge_base table.
+    Generates embedding and saves to rag_knowledge table.
 
     Categories:
     - schema: Database structures, tables
@@ -1564,7 +1564,7 @@ async def rag_ingest(request: RAGIngestRequest):
 
         # 2. Check if knowledge with same title exists
         check_response = requests.get(
-            f"{db.base_url}/knowledge_base",
+            f"{db.base_url}/rag_knowledge",
             headers=db.headers,
             params={
                 "title": f"eq.{request.title}",
@@ -1591,7 +1591,7 @@ async def rag_ingest(request: RAGIngestRequest):
             # Update existing
             knowledge_id = existing[0]["id"]
             response = requests.patch(
-                f"{db.base_url}/knowledge_base",
+                f"{db.base_url}/rag_knowledge",
                 headers=db.headers,
                 params={"id": f"eq.{knowledge_id}"},
                 json=knowledge_data
@@ -1601,7 +1601,7 @@ async def rag_ingest(request: RAGIngestRequest):
             knowledge_data["created_at"] = datetime.now().isoformat()
             knowledge_data["created_by"] = "api-server"
             response = requests.post(
-                f"{db.base_url}/knowledge_base",
+                f"{db.base_url}/rag_knowledge",
                 headers=db.headers,
                 json=knowledge_data
             )
@@ -1667,7 +1667,7 @@ async def rag_search(request: RAGSearchRequest):
             rpc_payload["filter_tags"] = request.tags
 
         response = requests.post(
-            f"{SUPABASE_URL}/rest/v1/rpc/search_knowledge",
+            f"{SUPABASE_URL}/rest/v1/rpc/search_rag_knowledge",
             headers=db.headers,
             json=rpc_payload
         )
@@ -1694,7 +1694,7 @@ async def rag_search(request: RAGSearchRequest):
             for r in results:
                 try:
                     requests.post(
-                        f"{SUPABASE_URL}/rest/v1/rpc/increment_knowledge_usage",
+                        f"{SUPABASE_URL}/rest/v1/rpc/increment_rag_usage",
                         headers=db.headers,
                         json={"knowledge_id": r["id"]}
                     )
@@ -1732,7 +1732,7 @@ async def rag_categories():
     try:
         # Query distinct categories with counts
         response = requests.get(
-            f"{db.base_url}/knowledge_base",
+            f"{db.base_url}/rag_knowledge",
             headers=db.headers,
             params={"select": "category"}
         )
@@ -1777,7 +1777,7 @@ async def rag_stats():
     try:
         # Count total knowledge
         response = requests.get(
-            f"{db.base_url}/knowledge_base",
+            f"{db.base_url}/rag_knowledge",
             headers=db.headers,
             params={"select": "id,category,project_key,usage_count,created_at"}
         )
@@ -1812,6 +1812,237 @@ async def rag_stats():
     except Exception as e:
         logger.error(f"RAG Stats error: {e}")
         return {"success": False, "error": str(e)}
+
+
+# ============================================
+# FASE 0 - INTEGRATION ENDPOINTS
+# Endpoints para integracao AgenticOS <-> AI Factory
+# ============================================
+
+class LeadContextRequest(BaseModel):
+    """Request para buscar contexto do lead."""
+    channel: str = Field(..., description="Canal: instagram, whatsapp, email")
+    identifier: str = Field(..., description="Identificador: @handle, +5511999, email")
+
+
+class LeadContextResponse(BaseModel):
+    """Response com contexto do lead para AI Agent."""
+    found: bool
+    lead_id: Optional[str] = None
+    cargo: Optional[str] = None
+    empresa: Optional[str] = None
+    setor: Optional[str] = None
+    porte: Optional[str] = None
+    icp_score: Optional[int] = None
+    icp_tier: Optional[str] = None
+    ig_followers: Optional[int] = None
+    ig_engagement: Optional[float] = None
+    was_prospected: bool = False
+    prospected_at: Optional[str] = None
+    context_string: Optional[str] = None
+
+
+class SyncLeadRequest(BaseModel):
+    """Request para sincronizar lead entre sistemas."""
+    lead_id: str
+    source: str = Field(..., description="Sistema origem: agenticos, ai_factory")
+    target: str = Field(..., description="Sistema destino: agenticos, ai_factory, ghl")
+
+
+class UpdateGHLRequest(BaseModel):
+    """Request para atualizar contato no GHL."""
+    contact_id: str
+    location_id: str
+    custom_fields: Dict[str, Any]
+
+
+@app.post("/api/get-lead-context", response_model=LeadContextResponse)
+async def get_lead_context(request: LeadContextRequest):
+    """
+    Busca contexto do lead para o AI Factory.
+    Chamado pelo 05-Execution antes de gerar resposta.
+
+    Args:
+        channel: Canal de origem (instagram, whatsapp, email)
+        identifier: Identificador no canal (@handle, telefone, email)
+
+    Returns:
+        Contexto do lead com dados enriquecidos para hiperpersonalizacao
+    """
+    try:
+        # Importar skill
+        from skills.get_lead_by_channel import get_lead_by_channel, get_lead_context_for_ai
+
+        # Buscar contexto formatado
+        result = await get_lead_context_for_ai(
+            channel=request.channel,
+            identifier=request.identifier
+        )
+
+        if not result.get("success"):
+            return LeadContextResponse(found=False)
+
+        data = result.get("data", {})
+
+        if not data.get("found"):
+            return LeadContextResponse(found=False)
+
+        lead = data.get("lead_data", {})
+
+        return LeadContextResponse(
+            found=True,
+            lead_id=lead.get("id"),
+            cargo=lead.get("cargo"),
+            empresa=lead.get("empresa"),
+            setor=lead.get("setor"),
+            porte=lead.get("porte"),
+            icp_score=lead.get("icp_score"),
+            icp_tier=lead.get("icp_tier"),
+            ig_followers=lead.get("ig_followers"),
+            ig_engagement=lead.get("ig_engagement"),
+            was_prospected=data.get("was_prospected", False),
+            prospected_at=data.get("prospected_at"),
+            context_string=data.get("context_string")
+        )
+
+    except Exception as e:
+        logger.error(f"Get lead context error: {e}")
+        return LeadContextResponse(found=False)
+
+
+@app.post("/api/sync-lead")
+async def sync_lead_endpoint(request: SyncLeadRequest):
+    """
+    Sincroniza lead entre sistemas.
+
+    Args:
+        lead_id: ID do lead
+        source: Sistema origem (agenticos, ai_factory)
+        target: Sistema destino (agenticos, ai_factory, ghl)
+
+    Returns:
+        Status da sincronizacao
+    """
+    try:
+        from skills.sync_lead import sync_lead
+
+        result = await sync_lead(
+            lead_id=request.lead_id,
+            source=request.source,
+            target=request.target
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Sync lead error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/update-ghl-contact")
+async def update_ghl_contact_endpoint(request: UpdateGHLRequest):
+    """
+    Atualiza custom fields de contato no GHL.
+
+    Args:
+        contact_id: ID do contato no GHL
+        location_id: ID da location
+        custom_fields: Dict com field_key -> value
+
+    Returns:
+        Status da atualizacao
+    """
+    try:
+        from skills.update_ghl_contact import update_ghl_contact
+
+        result = await update_ghl_contact(
+            contact_id=request.contact_id,
+            location_id=request.location_id,
+            custom_fields=request.custom_fields
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Update GHL contact error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/ensure-ghl-fields/{location_id}")
+async def ensure_ghl_fields_endpoint(location_id: str):
+    """
+    Garante que custom fields necessarios existem no GHL.
+
+    Args:
+        location_id: ID da location no GHL
+
+    Returns:
+        Lista de campos existentes, criados e falhos
+    """
+    try:
+        from skills.update_ghl_contact import ensure_custom_fields_exist
+
+        result = await ensure_custom_fields_exist(location_id=location_id)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Ensure GHL fields error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/skills")
+async def list_skills():
+    """
+    Lista todos os skills disponiveis.
+
+    Returns:
+        Lista de skills com nome e descricao
+    """
+    try:
+        from skills import SkillRegistry
+
+        skills = SkillRegistry.list_all()
+
+        return {
+            "success": True,
+            "skills": skills,
+            "total": len(skills)
+        }
+
+    except Exception as e:
+        logger.error(f"List skills error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/health")
+async def health_check():
+    """
+    Health check endpoint.
+
+    Returns:
+        Status do servidor e conexoes
+    """
+    health = {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "fase-0",
+        "connections": {}
+    }
+
+    # Check Supabase
+    try:
+        from supabase_integration import SupabaseClient
+        sb = SupabaseClient()
+        health["connections"]["supabase"] = "connected"
+    except Exception as e:
+        health["connections"]["supabase"] = f"error: {str(e)}"
+
+    # Check GHL
+    ghl_key = os.getenv("GHL_API_KEY") or os.getenv("GHL_ACCESS_TOKEN")
+    health["connections"]["ghl"] = "configured" if ghl_key else "not configured"
+
+    return health
 
 
 # ============================================
