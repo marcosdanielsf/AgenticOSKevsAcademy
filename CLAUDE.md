@@ -386,6 +386,43 @@ Use debug scripts to troubleshoot API integrations:
 
 ---
 
+## 🔗 N8N INTEGRATION (Mentorfy)
+
+### Credenciais
+```
+N8N_BASE_URL=https://cliente-a1.mentorfy.io
+N8N_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjMjM2NzAyYS1mYjFjLTQ3MWMtYjIyYy02Yjg5OGExN2JjYjEiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY3NDQ4Mjk2fQ.TG8jabPhkgavyTt9Z42YEKPsJJulpH1ZMceIizP5mOs
+```
+
+### Workflows Principais
+| ID | Nome | Descrição |
+|----|------|-----------|
+| `R2fVs2qpct1Qr2Y1` | GHL - Mottivme - EUA Versionado | Workflow principal de classificação de leads |
+
+### Exemplos de Uso da API
+```bash
+# Listar workflows
+curl -s "https://cliente-a1.mentorfy.io/api/v1/workflows" \
+  -H "X-N8N-API-KEY: $N8N_API_KEY" | jq '.data[] | {id, name}'
+
+# Obter workflow específico
+curl -s "https://cliente-a1.mentorfy.io/api/v1/workflows/R2fVs2qpct1Qr2Y1" \
+  -H "X-N8N-API-KEY: $N8N_API_KEY" | jq '.nodes | length'
+
+# Listar execuções recentes
+curl -s "https://cliente-a1.mentorfy.io/api/v1/executions?workflowId=R2fVs2qpct1Qr2Y1&limit=5" \
+  -H "X-N8N-API-KEY: $N8N_API_KEY" | jq '.data[] | {id, status, finished: .stoppedAt}'
+```
+
+### Atualização via API (03/01/2026)
+Script Python para atualizar workflow: `/tmp/update_workflow.py`
+- Renomeia nodes
+- Adiciona novos nodes
+- Atualiza conexões
+- PUT para `api/v1/workflows/{id}` com `{nodes, connections, name, settings}`
+
+---
+
 ## 🚀 RAILWAY DEPLOYMENT (PRODUÇÃO)
 
 ### URL de Produção
@@ -398,10 +435,14 @@ https://agenticoskevsacademy-production.up.railway.app
 |----------|--------|-----------|
 | `/health` | GET | Health check do sistema |
 | `/docs` | GET | Documentação Swagger interativa |
+| `/debug/env` | GET | Debug variáveis de ambiente |
 | `/webhook/classify-lead` | POST | Classifica lead com IA (Gemini) |
 | `/webhook/inbound-dm` | POST | Processa DM + scrape perfil + salva Supabase |
 | `/webhook/scrape-profile` | POST | Scrape perfil Instagram via API |
 | `/webhook/send-dm` | POST | Envia DM para usuário |
+| `/webhook/rag-ingest` | POST | **RAG** - Adiciona conhecimento à base |
+| `/webhook/rag-search` | POST | **RAG** - Busca semântica na base |
+| `/webhook/rag-categories` | GET | **RAG** - Lista categorias |
 | `/api/leads` | GET | Lista leads do banco |
 | `/api/stats` | GET | Estatísticas gerais |
 
@@ -410,6 +451,7 @@ https://agenticoskevsacademy-production.up.railway.app
 SUPABASE_URL=https://bfumywvwubvernvhjehk.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<sua_chave>
 GEMINI_API_KEY=<sua_chave>
+OPENAI_API_KEY=<sua_chave>  # Obrigatório para RAG/Segundo Cérebro
 INSTAGRAM_SESSION_ID=<seu_session_id>
 ```
 
@@ -587,6 +629,129 @@ ERROR: No matching distribution found for concurrent.futures
 
 ---
 
+## 🧠 SEGUNDO CÉREBRO - SISTEMA RAG
+
+### Descrição
+Sistema de memória persistente usando RAG (Retrieval-Augmented Generation) com pgvector para busca semântica. Permite armazenar e recuperar conhecimentos, decisões, padrões e regras de negócio.
+
+### Endpoints RAG
+
+| Endpoint | Método | Descrição |
+|----------|--------|-----------|
+| `/webhook/rag-ingest` | POST | Adiciona conhecimento à base |
+| `/webhook/rag-search` | POST | Busca semântica na base |
+| `/webhook/rag-categories` | GET | Lista categorias disponíveis |
+| `/debug/env` | GET | Verifica configuração (openai_configured) |
+
+### Categorias de Conhecimento
+- `schema` - Estruturas de banco, tabelas
+- `pattern` - Padrões de código, arquitetura
+- `rule` - Regras de negócio, convenções
+- `decision` - Decisões técnicas tomadas
+- `error_fix` - Erros e suas correções
+- `workflow` - Workflows n8n, automações
+- `api` - Endpoints, integrações
+
+### Exemplos de Uso
+
+#### Adicionar Conhecimento (Ingest)
+```bash
+curl -X POST "https://agenticoskevsacademy-production.up.railway.app/webhook/rag-ingest" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "rule",
+    "title": "Regra de Classificação de Leads",
+    "content": "Leads com score acima de 80 são HOT, entre 50-80 são WARM, abaixo de 50 são COLD.",
+    "project_key": "segundo-cerebro",
+    "tags": ["leads", "classificacao"]
+  }'
+```
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "knowledge_id": "uuid-do-conhecimento",
+  "message": "Knowledge created successfully"
+}
+```
+
+#### Busca Semântica (Search)
+```bash
+curl -X POST "https://agenticoskevsacademy-production.up.railway.app/webhook/rag-search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "como classificar leads",
+    "project_key": "segundo-cerebro",
+    "threshold": 0.5,
+    "limit": 5
+  }'
+```
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "results": [
+    {
+      "id": "uuid",
+      "title": "Regra de Classificação de Leads",
+      "content": "Leads com score acima de 80...",
+      "category": "rule",
+      "similarity": 0.78,
+      "tags": ["leads", "classificacao"]
+    }
+  ],
+  "count": 1
+}
+```
+
+### Arquitetura Técnica
+- **Embeddings**: OpenAI `text-embedding-3-small` (1536 dimensões)
+- **Banco**: Supabase com extensão pgvector
+- **Busca**: Cosine similarity via função `search_rag_knowledge`
+- **Tabela**: `rag_knowledge`
+
+### Variáveis de Ambiente Necessárias
+```
+OPENAI_API_KEY=sk-proj-...  # Obrigatório para embeddings
+SUPABASE_URL=https://...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+### Tabela Supabase: rag_knowledge
+```sql
+CREATE TABLE rag_knowledge (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    category TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    embedding vector(1536),
+    project_key TEXT,
+    tags TEXT[],
+    source TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### Project Keys Conhecidos
+| Project Key | Descrição |
+|-------------|-----------|
+| `segundo-cerebro` | Sistema de memória/RAG central |
+| `assembly-line` | Assembly Line SaaS |
+| `socialfy` | Socialfy CRM |
+| `motive-squad` | MOTIVE SQUAD WhatsApp |
+| `mottivme-geral` | Operações gerais |
+
+### Constraints RAG
+- ⚠️ Threshold padrão: 0.7 (usar 0.4-0.5 para buscas mais amplas)
+- ⚠️ OPENAI_API_KEY deve estar configurada no Railway
+- ✅ Embeddings são gerados automaticamente no ingest
+- ✅ Busca funciona por similaridade semântica, não keyword
+
+---
+
 ## 🎯 COMANDOS RÁPIDOS
 
 ### Testar API Railway
@@ -612,4 +777,18 @@ python3 demo_flavia_envia.py
 curl -X POST "https://agenticoskevsacademy-production.up.railway.app/webhook/scrape-profile" \
   -H "Content-Type: application/json" \
   -d '{"username": "flavialealbeauty", "save_to_db": true}'
+```
+
+### RAG - Adicionar Conhecimento
+```bash
+curl -X POST "https://agenticoskevsacademy-production.up.railway.app/webhook/rag-ingest" \
+  -H "Content-Type: application/json" \
+  -d '{"category": "rule", "title": "Titulo", "content": "Conteudo", "project_key": "segundo-cerebro", "tags": ["tag1"]}'
+```
+
+### RAG - Buscar Conhecimento
+```bash
+curl -X POST "https://agenticoskevsacademy-production.up.railway.app/webhook/rag-search" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "sua busca aqui", "project_key": "segundo-cerebro", "threshold": 0.5, "limit": 5}'
 ```
