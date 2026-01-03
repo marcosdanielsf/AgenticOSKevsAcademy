@@ -2675,6 +2675,190 @@ async def auto_enrich_lead(request: AutoEnrichRequest):
         )
 
 
+# ============================================
+# ANALYZE CONVERSATION CONTEXT - Detecta se é resposta de prospecção
+# ============================================
+
+class ConversationContextRequest(BaseModel):
+    """Request para análise de contexto de conversa"""
+    contact_id: str
+    location_id: str
+    current_message: str
+    contact_tags: Optional[List[str]] = None
+    last_message_direction: Optional[str] = None  # "inbound" ou "outbound"
+    conversation_count: Optional[int] = None
+
+class ConversationContextResponse(BaseModel):
+    """Response da análise de contexto"""
+    should_activate_ia: bool
+    reason: str
+    context_type: str  # "prospecting_response", "inbound_organic", "returning_lead", "personal", "spam"
+    confidence: float
+    recommendation: str
+    extra_context: Optional[Dict[str, Any]] = None
+
+@app.post("/api/analyze-conversation-context", response_model=ConversationContextResponse)
+async def analyze_conversation_context(request: ConversationContextRequest):
+    """
+    Analisa o contexto da conversa para decidir se deve ativar IA.
+
+    Lógica:
+    1. Se última mensagem foi NOSSA (outbound) → Lead está respondendo prospecção → ATIVAR
+    2. Se tem tags de prospecção (prospectado, abordado, etc) → ATIVAR
+    3. Se é primeira mensagem (inbound orgânico) → Classificar com IA
+    4. Se histórico indica amigo/família → NÃO ATIVAR
+
+    Chamado ANTES do classify-lead para dar contexto.
+    """
+    logger.info(f"Analyzing conversation context for contact {request.contact_id}")
+
+    try:
+        tags = request.contact_tags or []
+        tags_lower = [t.lower() for t in tags]
+
+        # ============================================
+        # REGRA 1: Tags de prospecção = SEMPRE ativar
+        # ============================================
+        prospecting_tags = ["prospectado", "abordado", "social_selling", "outbound", "lead_qualificado", "ia-ativa"]
+        has_prospecting_tag = any(tag in tags_lower for tag in prospecting_tags)
+
+        if has_prospecting_tag:
+            return ConversationContextResponse(
+                should_activate_ia=True,
+                reason="Lead possui tags de prospecção - foi abordado anteriormente",
+                context_type="prospecting_response",
+                confidence=0.95,
+                recommendation="Ativar IA imediatamente - lead está respondendo prospecção",
+                extra_context={"matching_tags": [t for t in tags if t.lower() in prospecting_tags]}
+            )
+
+        # ============================================
+        # REGRA 2: Última mensagem foi nossa = Respondendo
+        # ============================================
+        if request.last_message_direction == "outbound":
+            return ConversationContextResponse(
+                should_activate_ia=True,
+                reason="Última mensagem foi nossa - lead está respondendo",
+                context_type="prospecting_response",
+                confidence=0.90,
+                recommendation="Ativar IA - lead respondeu nossa mensagem anterior"
+            )
+
+        # ============================================
+        # REGRA 3: Tags de exclusão = NÃO ativar
+        # ============================================
+        exclusion_tags = ["amigo", "familia", "pessoal", "nao_ativar", "perdido", "spam", "bloqueado"]
+        has_exclusion_tag = any(tag in tags_lower for tag in exclusion_tags)
+
+        if has_exclusion_tag:
+            return ConversationContextResponse(
+                should_activate_ia=False,
+                reason="Lead possui tags de exclusão - não é lead comercial",
+                context_type="personal",
+                confidence=0.95,
+                recommendation="Não ativar IA - mover para perdido ou ignorar",
+                extra_context={"matching_tags": [t for t in tags if t.lower() in exclusion_tags]}
+            )
+
+        # ============================================
+        # REGRA 4: Primeira mensagem = Classificar com IA
+        # ============================================
+        if request.conversation_count is None or request.conversation_count <= 1:
+            # Analisar mensagem com Gemini para classificar
+            try:
+                import google.generativeai as genai
+
+                gemini_key = os.getenv("GEMINI_API_KEY")
+                if gemini_key:
+                    genai.configure(api_key=gemini_key)
+                    model = genai.GenerativeModel("gemini-1.5-flash")
+
+                    prompt = f"""Analise esta primeira mensagem de um contato e classifique:
+
+MENSAGEM: "{request.current_message}"
+
+Classifique como:
+- LEAD_POTENTIAL: Parece ser alguém com interesse comercial
+- PERSONAL: Parece ser amigo, família ou contato pessoal
+- SPAM: Propaganda, bot ou irrelevante
+- UNCLEAR: Não é possível determinar
+
+Responda APENAS com o formato JSON:
+{{"classification": "TIPO", "confidence": 0.X, "reason": "explicação breve"}}"""
+
+                    response = model.generate_content(prompt)
+                    response_text = response.text.strip()
+
+                    # Parse JSON da resposta
+                    if "{" in response_text:
+                        json_str = response_text[response_text.find("{"):response_text.rfind("}")+1]
+                        analysis = json.loads(json_str)
+
+                        classification = analysis.get("classification", "UNCLEAR")
+                        confidence = analysis.get("confidence", 0.5)
+
+                        if classification == "LEAD_POTENTIAL":
+                            return ConversationContextResponse(
+                                should_activate_ia=True,
+                                reason=f"Primeira mensagem - IA classificou como potencial lead: {analysis.get('reason', '')}",
+                                context_type="inbound_organic",
+                                confidence=confidence,
+                                recommendation="Ativar IA para qualificação"
+                            )
+                        elif classification == "PERSONAL":
+                            return ConversationContextResponse(
+                                should_activate_ia=False,
+                                reason=f"Primeira mensagem - IA identificou como pessoal: {analysis.get('reason', '')}",
+                                context_type="personal",
+                                confidence=confidence,
+                                recommendation="Não ativar IA - provavelmente contato pessoal"
+                            )
+                        elif classification == "SPAM":
+                            return ConversationContextResponse(
+                                should_activate_ia=False,
+                                reason=f"Primeira mensagem - IA identificou como spam: {analysis.get('reason', '')}",
+                                context_type="spam",
+                                confidence=confidence,
+                                recommendation="Não ativar IA - marcar como spam"
+                            )
+            except Exception as e:
+                logger.warning(f"Erro ao classificar com Gemini: {e}")
+
+        # ============================================
+        # REGRA 5: Lead retornando (já teve conversa)
+        # ============================================
+        if request.conversation_count and request.conversation_count > 1:
+            return ConversationContextResponse(
+                should_activate_ia=True,
+                reason="Lead retornando - já houve conversas anteriores",
+                context_type="returning_lead",
+                confidence=0.75,
+                recommendation="Ativar IA para continuar atendimento"
+            )
+
+        # ============================================
+        # FALLBACK: Caso não se encaixe em nenhuma regra
+        # ============================================
+        return ConversationContextResponse(
+            should_activate_ia=True,
+            reason="Contexto não determinado - ativando IA por precaução",
+            context_type="inbound_organic",
+            confidence=0.50,
+            recommendation="Ativar IA e monitorar"
+        )
+
+    except Exception as e:
+        logger.error(f"Error analyzing conversation context: {e}", exc_info=True)
+        # Em caso de erro, ativar IA por segurança
+        return ConversationContextResponse(
+            should_activate_ia=True,
+            reason=f"Erro na análise: {str(e)} - ativando por precaução",
+            context_type="inbound_organic",
+            confidence=0.30,
+            recommendation="Ativar IA (fallback de erro)"
+        )
+
+
 @app.get("/api/health")
 async def health_check():
     """
