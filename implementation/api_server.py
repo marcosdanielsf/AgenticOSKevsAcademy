@@ -15,6 +15,9 @@ Endpoints:
 - /webhook/check-inbox - Check for new messages
 - /webhook/classify-lead - Classify a lead with AI
 - /webhook/enrich-lead - Enrich lead with profile data
+- /webhook/rag-ingest - Ingest knowledge into RAG system (Segundo Cérebro)
+- /webhook/rag-search - Semantic search in knowledge base
+- /webhook/rag-categories - List knowledge categories
 
 Usage:
     python api_server.py
@@ -56,6 +59,7 @@ LOGS_DIR.mkdir(exist_ok=True)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 API_SECRET_KEY = os.getenv("API_SECRET_KEY", "socialfy-secret-2024")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Logging
 logging.basicConfig(
@@ -172,6 +176,56 @@ class ScrapePostLikersResponse(BaseModel):
     total_scraped: int = 0
     leads_saved: int = 0
     post_url: str
+    error: Optional[str] = None
+
+
+# ============================================
+# RAG MODELS (Segundo Cérebro)
+# ============================================
+
+class RAGIngestRequest(BaseModel):
+    """Request to ingest knowledge into the RAG system"""
+    category: str = Field(..., description="Category: schema, pattern, rule, decision, error_fix, workflow, api")
+    title: str = Field(..., description="Title of the knowledge")
+    content: str = Field(..., description="Full content/explanation")
+    project_key: Optional[str] = Field(None, description="Project identifier: ai-factory, socialfy, etc")
+    tags: List[str] = Field(default=[], description="Tags for filtering")
+    source: Optional[str] = Field(None, description="Source of the knowledge")
+
+class RAGIngestResponse(BaseModel):
+    success: bool
+    knowledge_id: Optional[str] = None
+    message: str
+    error: Optional[str] = None
+
+class RAGSearchRequest(BaseModel):
+    """Request to search knowledge in the RAG system"""
+    query: str = Field(..., description="Search query")
+    category: Optional[str] = Field(None, description="Filter by category")
+    project_key: Optional[str] = Field(None, description="Filter by project")
+    tags: Optional[List[str]] = Field(None, description="Filter by tags")
+    threshold: float = Field(0.7, description="Minimum similarity threshold (0-1)")
+    limit: int = Field(5, description="Maximum results to return")
+
+class RAGSearchResult(BaseModel):
+    id: str
+    category: str
+    project_key: Optional[str]
+    title: str
+    content: str
+    tags: List[str]
+    similarity: float
+    usage_count: int
+
+class RAGSearchResponse(BaseModel):
+    success: bool
+    results: List[RAGSearchResult] = []
+    count: int = 0
+    error: Optional[str] = None
+
+class RAGCategoriesResponse(BaseModel):
+    success: bool
+    categories: List[Dict[str, Any]] = []
     error: Optional[str] = None
 
 
@@ -1453,6 +1507,310 @@ async def get_stats(tenant_id: Optional[str] = None):
 
     except Exception as e:
         logger.error(f"Error fetching stats: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# ============================================
+# RAG ENDPOINTS (Segundo Cérebro)
+# ============================================
+
+def get_openai_embedding(text: str) -> Optional[List[float]]:
+    """Get embedding from OpenAI API"""
+    try:
+        import openai
+
+        if not OPENAI_API_KEY:
+            logger.error("OPENAI_API_KEY not configured")
+            return None
+
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)
+        response = client.embeddings.create(
+            model="text-embedding-3-small",
+            input=text
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        logger.error(f"Error getting OpenAI embedding: {e}")
+        return None
+
+
+@app.post("/webhook/rag-ingest", response_model=RAGIngestResponse)
+async def rag_ingest(request: RAGIngestRequest):
+    """
+    Ingest knowledge into the RAG system (Segundo Cérebro).
+    Generates embedding and saves to knowledge_base table.
+
+    Categories:
+    - schema: Database structures, tables
+    - pattern: Code patterns, architecture
+    - rule: Business rules, conventions
+    - decision: Technical decisions made
+    - error_fix: Errors and their fixes
+    - workflow: n8n workflows, automations
+    - api: Endpoints, integrations
+    """
+    logger.info(f"RAG Ingest: {request.title} ({request.category})")
+
+    try:
+        # 1. Generate embedding
+        embedding = get_openai_embedding(f"{request.title}\n\n{request.content}")
+
+        if not embedding:
+            return RAGIngestResponse(
+                success=False,
+                message="Failed to generate embedding",
+                error="OpenAI API error or not configured"
+            )
+
+        # 2. Check if knowledge with same title exists
+        check_response = requests.get(
+            f"{db.base_url}/knowledge_base",
+            headers=db.headers,
+            params={
+                "title": f"eq.{request.title}",
+                "select": "id"
+            }
+        )
+
+        existing = check_response.json() if check_response.status_code == 200 else []
+
+        # 3. Prepare data
+        knowledge_data = {
+            "category": request.category,
+            "title": request.title,
+            "content": request.content,
+            "embedding": embedding,
+            "project_key": request.project_key,
+            "tags": request.tags,
+            "source": request.source or f"api-{datetime.now().strftime('%Y-%m-%d')}",
+            "updated_at": datetime.now().isoformat()
+        }
+
+        # 4. Upsert (update if exists, insert if not)
+        if existing:
+            # Update existing
+            knowledge_id = existing[0]["id"]
+            response = requests.patch(
+                f"{db.base_url}/knowledge_base",
+                headers=db.headers,
+                params={"id": f"eq.{knowledge_id}"},
+                json=knowledge_data
+            )
+        else:
+            # Insert new
+            knowledge_data["created_at"] = datetime.now().isoformat()
+            knowledge_data["created_by"] = "api-server"
+            response = requests.post(
+                f"{db.base_url}/knowledge_base",
+                headers=db.headers,
+                json=knowledge_data
+            )
+
+        if response.status_code in [200, 201]:
+            result = response.json()
+            knowledge_id = result[0]["id"] if result else existing[0]["id"] if existing else None
+
+            logger.info(f"RAG Ingest success: {knowledge_id}")
+            return RAGIngestResponse(
+                success=True,
+                knowledge_id=knowledge_id,
+                message=f"Knowledge {'updated' if existing else 'created'} successfully"
+            )
+        else:
+            logger.error(f"RAG Ingest failed: {response.text}")
+            return RAGIngestResponse(
+                success=False,
+                message="Failed to save knowledge",
+                error=response.text
+            )
+
+    except Exception as e:
+        logger.error(f"RAG Ingest error: {e}", exc_info=True)
+        return RAGIngestResponse(
+            success=False,
+            message="Error processing request",
+            error=str(e)
+        )
+
+
+@app.post("/webhook/rag-search", response_model=RAGSearchResponse)
+async def rag_search(request: RAGSearchRequest):
+    """
+    Semantic search in the knowledge base.
+    Uses pgvector for cosine similarity search.
+    """
+    logger.info(f"RAG Search: {request.query[:50]}...")
+
+    try:
+        # 1. Generate embedding for query
+        query_embedding = get_openai_embedding(request.query)
+
+        if not query_embedding:
+            return RAGSearchResponse(
+                success=False,
+                error="Failed to generate query embedding"
+            )
+
+        # 2. Call search function via RPC
+        # Using Supabase RPC to call the search_knowledge function
+        rpc_payload = {
+            "query_embedding": query_embedding,
+            "match_threshold": request.threshold,
+            "match_count": request.limit
+        }
+
+        if request.category:
+            rpc_payload["filter_category"] = request.category
+        if request.project_key:
+            rpc_payload["filter_project"] = request.project_key
+        if request.tags:
+            rpc_payload["filter_tags"] = request.tags
+
+        response = requests.post(
+            f"{SUPABASE_URL}/rest/v1/rpc/search_knowledge",
+            headers=db.headers,
+            json=rpc_payload
+        )
+
+        if response.status_code == 200:
+            results = response.json()
+
+            # Convert to response model
+            search_results = [
+                RAGSearchResult(
+                    id=str(r["id"]),
+                    category=r["category"],
+                    project_key=r.get("project_key"),
+                    title=r["title"],
+                    content=r["content"],
+                    tags=r.get("tags", []),
+                    similarity=r["similarity"],
+                    usage_count=r.get("usage_count", 0)
+                )
+                for r in results
+            ]
+
+            # Increment usage count for returned results
+            for r in results:
+                try:
+                    requests.post(
+                        f"{SUPABASE_URL}/rest/v1/rpc/increment_knowledge_usage",
+                        headers=db.headers,
+                        json={"knowledge_id": r["id"]}
+                    )
+                except:
+                    pass  # Non-critical, don't fail search
+
+            logger.info(f"RAG Search found {len(search_results)} results")
+            return RAGSearchResponse(
+                success=True,
+                results=search_results,
+                count=len(search_results)
+            )
+        else:
+            logger.error(f"RAG Search failed: {response.text}")
+            return RAGSearchResponse(
+                success=False,
+                error=f"Search failed: {response.text}"
+            )
+
+    except Exception as e:
+        logger.error(f"RAG Search error: {e}", exc_info=True)
+        return RAGSearchResponse(
+            success=False,
+            error=str(e)
+        )
+
+
+@app.get("/webhook/rag-categories", response_model=RAGCategoriesResponse)
+async def rag_categories():
+    """
+    List all knowledge categories with counts.
+    """
+    logger.info("RAG Categories: listing")
+
+    try:
+        # Query distinct categories with counts
+        response = requests.get(
+            f"{db.base_url}/knowledge_base",
+            headers=db.headers,
+            params={"select": "category"}
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+
+            # Count by category
+            category_counts = {}
+            for item in data:
+                cat = item.get("category", "unknown")
+                category_counts[cat] = category_counts.get(cat, 0) + 1
+
+            categories = [
+                {"category": cat, "count": count}
+                for cat, count in sorted(category_counts.items(), key=lambda x: -x[1])
+            ]
+
+            return RAGCategoriesResponse(
+                success=True,
+                categories=categories
+            )
+        else:
+            return RAGCategoriesResponse(
+                success=False,
+                error=response.text
+            )
+
+    except Exception as e:
+        logger.error(f"RAG Categories error: {e}")
+        return RAGCategoriesResponse(
+            success=False,
+            error=str(e)
+        )
+
+
+@app.get("/webhook/rag-stats")
+async def rag_stats():
+    """
+    Get RAG system statistics.
+    """
+    try:
+        # Count total knowledge
+        response = requests.get(
+            f"{db.base_url}/knowledge_base",
+            headers=db.headers,
+            params={"select": "id,category,project_key,usage_count,created_at"}
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+
+            # Calculate stats
+            total = len(data)
+            by_category = {}
+            by_project = {}
+            total_usage = 0
+
+            for item in data:
+                cat = item.get("category", "unknown")
+                proj = item.get("project_key", "none")
+                by_category[cat] = by_category.get(cat, 0) + 1
+                by_project[proj] = by_project.get(proj, 0) + 1
+                total_usage += item.get("usage_count", 0)
+
+            return {
+                "success": True,
+                "total_knowledge": total,
+                "total_usage": total_usage,
+                "by_category": by_category,
+                "by_project": by_project,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {"success": False, "error": response.text}
+
+    except Exception as e:
+        logger.error(f"RAG Stats error: {e}")
         return {"success": False, "error": str(e)}
 
 
