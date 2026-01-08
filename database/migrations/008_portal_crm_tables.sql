@@ -447,12 +447,12 @@ SELECT
     AVG(gl.conversion_value) FILTER (WHERE gl.funnel_stage = 'won') as avg_ticket,
 
     -- Config do cliente
-    gcc.has_traffic_module,
+    CASE WHEN gcc.custo_trafego_mensal > 0 THEN true ELSE false END as has_traffic_module,
     gcc.custo_trafego_mensal as monthly_traffic_budget
 
 FROM growth_client_configs gcc
 LEFT JOIN growth_leads gl ON gcc.location_id = gl.location_id
-GROUP BY gcc.location_id, gcc.client_name, gcc.has_traffic_module, gcc.custo_trafego_mensal;
+GROUP BY gcc.location_id, gcc.client_name, gcc.custo_trafego_mensal;
 
 -- View: Funil por Canal
 CREATE OR REPLACE VIEW portal_vw_funnel_by_source AS
