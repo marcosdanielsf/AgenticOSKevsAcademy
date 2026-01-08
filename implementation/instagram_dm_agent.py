@@ -336,6 +336,63 @@ class SupabaseDB:
                 'dms_failed': dms_failed
             })
 
+    def sync_to_socialfy_leads(self, username: str, message_sent: str, lead_data: dict = None):
+        """
+        Sincroniza lead prospectado para socialfy_leads.
+        Isso permite que o n8n saiba que o lead foi prospectado quando ele responder.
+
+        Args:
+            username: Instagram username do lead
+            message_sent: Mensagem que foi enviada
+            lead_data: Dados adicionais do lead (full_name, bio, followers, etc)
+        """
+        try:
+            ig_handle = f"@{username}" if not username.startswith("@") else username
+            now = datetime.now().isoformat()
+
+            # Verificar se já existe em socialfy_leads
+            existing = self._request("GET", "socialfy_leads", params={
+                "instagram_handle": f"eq.{ig_handle}",
+                "limit": 1
+            })
+
+            lead_info = lead_data or {}
+
+            if existing:
+                # Atualizar registro existente
+                self._request("PATCH", "socialfy_leads",
+                    params={"id": f"eq.{existing[0]['id']}"},
+                    data={
+                        'outreach_sent_at': now,
+                        'last_outreach_message': message_sent[:500] if message_sent else None,
+                        'source': 'outbound_instagram_dm',
+                        'updated_at': now
+                    }
+                )
+                logger.info(f"✅ Sync: Atualizado socialfy_leads para @{username}")
+            else:
+                # Criar novo registro
+                self._request("POST", "socialfy_leads", data={
+                    'instagram_handle': ig_handle,
+                    'name': lead_info.get('full_name') or username,
+                    'source': 'outbound_instagram_dm',
+                    'source_channel': 'instagram_dm',
+                    'outreach_sent_at': now,
+                    'last_outreach_message': message_sent[:500] if message_sent else None,
+                    'ig_bio': lead_info.get('bio'),
+                    'ig_followers': lead_info.get('followers_count'),
+                    'status': 'prospected',
+                    'created_at': now,
+                    'updated_at': now
+                })
+                logger.info(f"✅ Sync: Criado socialfy_leads para @{username}")
+
+            return True
+
+        except Exception as e:
+            logger.warning(f"⚠️ Sync falhou para @{username}: {e}")
+            return False
+
 
 # ============================================
 # INSTAGRAM DM AGENT
@@ -765,6 +822,7 @@ class InstagramDMAgent:
                     break
 
                 # Generate message (Smart Mode or Template)
+                profile = None  # Inicializar para evitar erro de referência
                 if self.smart_mode:
                     message, score, profile = await self.analyze_and_generate_message(lead)
 
@@ -788,6 +846,13 @@ class InstagramDMAgent:
 
                 if result.success:
                     self.dms_sent += 1
+                    # Sincronizar com socialfy_leads para que n8n saiba que foi prospectado
+                    lead_data = {
+                        'full_name': lead.full_name,
+                        'bio': lead.bio,
+                        'followers_count': getattr(profile, 'followers_count', None) if self.smart_mode and profile else None
+                    }
+                    self.db.sync_to_socialfy_leads(lead.username, result.message_sent, lead_data)
                 else:
                     self.dms_failed += 1
 

@@ -2,6 +2,111 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+---
+
+# 🏗️ ARQUITETURA DO SISTEMA - VISÃO GERAL
+
+## Este Repositório no Ecossistema MOTTIVME Sales
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         MOTTIVME SALES ECOSYSTEM                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  ESTE REPOSITÓRIO: AgenticOSKevsAcademy                              │   │
+│  │  Deploy: Railway (https://agenticoskevsacademy-production.up.railway.app)│
+│  │                                                                       │   │
+│  │  ├── implementation/                                                  │   │
+│  │  │   ├── api_server.py          ← APIs chamadas pelo n8n             │   │
+│  │  │   ├── instagram_dm_agent.py  ← PROSPECTOR (envia DMs)             │   │
+│  │  │   ├── outbound_squad.py      ← Agentes de prospecção              │   │
+│  │  │   ├── skills/                ← Funções reutilizáveis              │   │
+│  │  │   │   ├── update_ghl_contact.py                                   │   │
+│  │  │   │   ├── sync_lead.py                                            │   │
+│  │  │   │   └── get_lead_by_channel.py                                  │   │
+│  │  │   └── supabase_integration.py                                     │   │
+│  │  │                                                                    │   │
+│  │  └── agents/                    ← Definições de agentes              │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                         │                                   │
+│                                         │ APIs                              │
+│                                         ▼                                   │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  N8N (Mentorfy): https://cliente-a1.mentorfy.io                      │   │
+│  │                                                                       │   │
+│  │  Fluxo Principal: SDR Julia Amare                                    │   │
+│  │  Path local: ~/Documents/Projetos/MOTTIVME SALES TOTAL/projects/     │   │
+│  │              n8n-workspace/Fluxos n8n/AI-Factory- Mottivme Sales/    │   │
+│  │              SDR Julia Amare - Corrigido.json                        │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                         │                                   │
+│                                         │ Webhooks                          │
+│                                         ▼                                   │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  GHL (GoHighLevel)                                                    │   │
+│  │  Contatos, Tags, Conversas                                           │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## APIs Principais (api_server.py)
+
+| Endpoint | Linha | Função | Chamado Por |
+|----------|-------|--------|-------------|
+| `/api/match-lead-context` | 2560 | Busca lead no Supabase | n8n |
+| `/api/analyze-conversation-context` | 3155 | Decide se ativa IA | n8n |
+| `/api/auto-enrich-lead` | 2945 | Scrape + salva perfil | n8n |
+| `/webhook/classify-lead` | ~1800 | Classifica com Gemini | n8n |
+| `/webhook/rag-search` | ~3400 | Busca semântica | Claude |
+| `/webhook/rag-ingest` | ~3500 | Salva conhecimento | Claude |
+
+## Tabelas Supabase Usadas
+
+| Tabela | Leitura | Escrita | Propósito |
+|--------|---------|---------|-----------|
+| `socialfy_leads` | ✅ | ✅ | Leads sincronizados |
+| `crm_leads` | ✅ | ✅ | CRM geral |
+| `agentic_instagram_leads` | ✅ | ✅ | Leads do scraper |
+| `agentic_instagram_dm_sent` | ✅ | ✅ | DMs enviadas |
+| `enriched_lead_data` | ✅ | ✅ | Dados enriquecidos |
+| `agent_conversations` | ✅ | ✅ | Histórico conversas |
+| `rag_knowledge` | ✅ | ✅ | Segundo Cérebro |
+
+## Fluxo de Prospecção
+
+```
+1. PROSPECTOR (instagram_dm_agent.py)
+   └─> Scrape leads → agentic_instagram_leads
+   └─> Envia DM → agentic_instagram_dm_sent
+   └─> ❌ NÃO sincroniza com GHL/socialfy_leads
+
+2. LEAD RESPONDE (via GHL)
+   └─> Webhook dispara n8n
+
+3. N8N (SDR Julia Amare)
+   └─> Chama /api/match-lead-context
+   └─> Chama /api/analyze-conversation-context
+   └─> Adiciona tag "lead-prospectado-ia" no GHL
+   └─> Classifica e responde
+```
+
+## ⚠️ BUGS CONHECIDOS
+
+### Bug 1: Tag `ativar_ia` tratada como prospecção
+- **Arquivo:** `implementation/api_server.py`
+- **Linha:** 3177
+- **Problema:** `ativar_ia` está na lista `prospecting_tags`
+- **Impacto:** Leads com flag de ativação são tratados como prospectados
+
+### Bug 2: Prospector não sincroniza
+- **Arquivo:** `implementation/instagram_dm_agent.py`
+- **Problema:** Após enviar DM, não seta `outreach_sent_at` nem adiciona tag no GHL
+- **Impacto:** n8n não sabe que lead foi prospectado
+
+---
+
 # ROLE: AUTONOMOUS WORKFLOW ARCHITECT
 
 ## THE "ii" FRAMEWORK

@@ -34,12 +34,16 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Header
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 from dotenv import load_dotenv
 import requests
+import time
+from collections import defaultdict
+import psutil
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -61,6 +65,109 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 API_SECRET_KEY = os.getenv("API_SECRET_KEY", "socialfy-secret-2024")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Rate Limiting Configuration
+RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "60"))  # requests per window
+RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))  # window in seconds
+
+# Server start time for uptime tracking
+SERVER_START_TIME = time.time()
+
+# Request metrics tracking
+request_metrics = {
+    "total_requests": 0,
+    "successful_requests": 0,
+    "failed_requests": 0,
+    "requests_by_endpoint": defaultdict(int),
+    "requests_by_status": defaultdict(int),
+    "last_request_time": None
+}
+
+
+# ============================================
+# RATE LIMITER
+# ============================================
+
+class RateLimiter:
+    """
+    Simple in-memory rate limiter using sliding window.
+    Tracks requests per IP address.
+    """
+
+    def __init__(self, max_requests: int = 60, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self.requests: Dict[str, List[float]] = defaultdict(list)
+        self._lock = asyncio.Lock()
+
+    async def is_allowed(self, client_ip: str) -> tuple[bool, dict]:
+        """
+        Check if request is allowed for given IP.
+        Returns (is_allowed, info_dict)
+        """
+        async with self._lock:
+            now = time.time()
+            window_start = now - self.window_seconds
+
+            # Clean old requests outside window
+            self.requests[client_ip] = [
+                req_time for req_time in self.requests[client_ip]
+                if req_time > window_start
+            ]
+
+            current_count = len(self.requests[client_ip])
+            remaining = max(0, self.max_requests - current_count)
+
+            # Calculate reset time
+            if self.requests[client_ip]:
+                oldest = min(self.requests[client_ip])
+                reset_time = int(oldest + self.window_seconds - now)
+            else:
+                reset_time = self.window_seconds
+
+            info = {
+                "limit": self.max_requests,
+                "remaining": remaining,
+                "reset": max(0, reset_time),
+                "window": self.window_seconds
+            }
+
+            if current_count >= self.max_requests:
+                return False, info
+
+            # Record this request
+            self.requests[client_ip].append(now)
+            info["remaining"] = remaining - 1
+
+            return True, info
+
+    def get_stats(self) -> dict:
+        """Get rate limiter statistics"""
+        now = time.time()
+        window_start = now - self.window_seconds
+
+        active_ips = 0
+        total_requests_in_window = 0
+
+        for ip, times in self.requests.items():
+            recent = [t for t in times if t > window_start]
+            if recent:
+                active_ips += 1
+                total_requests_in_window += len(recent)
+
+        return {
+            "active_clients": active_ips,
+            "requests_in_window": total_requests_in_window,
+            "max_requests_per_client": self.max_requests,
+            "window_seconds": self.window_seconds
+        }
+
+
+# Initialize rate limiter
+rate_limiter = RateLimiter(
+    max_requests=RATE_LIMIT_REQUESTS,
+    window_seconds=RATE_LIMIT_WINDOW
+)
 
 # Logging
 logging.basicConfig(
@@ -515,6 +622,89 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ============================================
+# RATE LIMITING MIDDLEWARE
+# ============================================
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """
+    Rate limiting middleware.
+    Applies to all endpoints except health checks.
+    """
+    # Skip rate limiting for health endpoints
+    path = request.url.path
+    if path in ["/health", "/api/health", "/", "/docs", "/openapi.json", "/redoc"]:
+        response = await call_next(request)
+        return response
+
+    # Get client IP (handle proxies)
+    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    if not client_ip:
+        client_ip = request.headers.get("X-Real-IP", request.client.host if request.client else "unknown")
+
+    # Check rate limit
+    allowed, info = await rate_limiter.is_allowed(client_ip)
+
+    if not allowed:
+        # Return 429 Too Many Requests
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "Too Many Requests",
+                "message": f"Rate limit exceeded. Try again in {info['reset']} seconds.",
+                "limit": info["limit"],
+                "remaining": 0,
+                "reset_in_seconds": info["reset"]
+            },
+            headers={
+                "X-RateLimit-Limit": str(info["limit"]),
+                "X-RateLimit-Remaining": "0",
+                "X-RateLimit-Reset": str(info["reset"]),
+                "Retry-After": str(info["reset"])
+            }
+        )
+
+    # Process request
+    response = await call_next(request)
+
+    # Add rate limit headers to response
+    response.headers["X-RateLimit-Limit"] = str(info["limit"])
+    response.headers["X-RateLimit-Remaining"] = str(info["remaining"])
+    response.headers["X-RateLimit-Reset"] = str(info["reset"])
+
+    return response
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    """
+    Middleware to track request metrics.
+    """
+    start_time = time.time()
+
+    # Process request
+    response = await call_next(request)
+
+    # Track metrics
+    process_time = time.time() - start_time
+    request_metrics["total_requests"] += 1
+    request_metrics["last_request_time"] = datetime.now().isoformat()
+    request_metrics["requests_by_endpoint"][request.url.path] += 1
+    request_metrics["requests_by_status"][response.status_code] += 1
+
+    if 200 <= response.status_code < 400:
+        request_metrics["successful_requests"] += 1
+    else:
+        request_metrics["failed_requests"] += 1
+
+    # Add timing header
+    response.headers["X-Process-Time"] = f"{process_time:.4f}"
+
+    return response
+
 
 # Database client
 db = SupabaseClient()
@@ -1404,44 +1594,110 @@ async def handle_scheduled_dm(data: Dict, tenant_id: str):
 
 
 # ============================================
-# LEADS API
+# LEADS API (with pagination)
 # ============================================
 
 @app.get("/api/leads")
 async def get_leads(
     source: Optional[str] = None,
     tenant_id: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    per_page: int = 50,
+    sort_by: str = "created_at",
+    sort_order: str = "desc"
 ):
-    """Get leads from database with filters"""
+    """
+    Get leads from database with filters and pagination.
+
+    Args:
+        source: Filter by lead source (e.g., 'post_like', 'api_scrape')
+        tenant_id: Filter by tenant
+        status: Filter by status (warm, cold, hot)
+        search: Search in username or name
+        page: Page number (1-indexed)
+        per_page: Items per page (max 100)
+        sort_by: Sort field (created_at, username, score)
+        sort_order: Sort order (asc, desc)
+
+    Returns:
+        Paginated response with leads and metadata
+    """
     try:
+        # Validate pagination params
+        page = max(1, page)
+        per_page = min(max(1, per_page), 100)  # Max 100 items per page
+        offset = (page - 1) * per_page
+
+        # Build query params
         params = {
-            "limit": limit,
+            "limit": per_page,
             "offset": offset,
-            "order": "created_at.desc"
+            "order": f"{sort_by}.{sort_order}"
         }
 
         if source:
             params["source"] = f"eq.{source}"
         if tenant_id:
             params["tenant_id"] = f"eq.{tenant_id}"
+        if status:
+            params["status"] = f"eq.{status}"
+        if search:
+            params["or"] = f"(username.ilike.%{search}%,full_name.ilike.%{search}%)"
 
+        # Get leads
         response = requests.get(
             f"{db.base_url}/agentic_instagram_leads",
             headers=db.headers,
             params=params
         )
+        leads = response.json() if response.status_code == 200 else []
+
+        # Get total count for pagination
+        count_headers = {**db.headers, "Prefer": "count=exact"}
+        count_params = {k: v for k, v in params.items() if k not in ["limit", "offset", "order"]}
+        count_response = requests.head(
+            f"{db.base_url}/agentic_instagram_leads",
+            headers=count_headers,
+            params=count_params
+        )
+
+        # Parse total from Content-Range header
+        content_range = count_response.headers.get("Content-Range", "0-0/0")
+        try:
+            total = int(content_range.split("/")[-1])
+        except (ValueError, IndexError):
+            total = len(leads)
+
+        total_pages = (total + per_page - 1) // per_page if per_page > 0 else 1
 
         return {
             "success": True,
-            "leads": response.json(),
-            "count": len(response.json())
+            "data": leads,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1,
+                "next_page": page + 1 if page < total_pages else None,
+                "prev_page": page - 1 if page > 1 else None
+            },
+            "filters": {
+                "source": source,
+                "tenant_id": tenant_id,
+                "status": status,
+                "search": search,
+                "sort_by": sort_by,
+                "sort_order": sort_order
+            }
         }
 
     except Exception as e:
         logger.error(f"Error fetching leads: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e), "data": [], "pagination": None}
 
 
 @app.get("/api/classified-leads")
@@ -1449,13 +1705,39 @@ async def get_classified_leads(
     classification: Optional[str] = None,
     tenant_id: Optional[str] = None,
     min_score: int = 0,
-    limit: int = 50
+    max_score: int = 100,
+    page: int = 1,
+    per_page: int = 50,
+    sort_by: str = "created_at",
+    sort_order: str = "desc"
 ):
-    """Get classified leads with filters"""
+    """
+    Get classified leads with filters and pagination.
+
+    Args:
+        classification: Filter by classification (LEAD_HOT, LEAD_WARM, LEAD_COLD, SPAM)
+        tenant_id: Filter by tenant
+        min_score: Minimum score filter (0-100)
+        max_score: Maximum score filter (0-100)
+        page: Page number (1-indexed)
+        per_page: Items per page (max 100)
+        sort_by: Sort field (created_at, score, classification)
+        sort_order: Sort order (asc, desc)
+
+    Returns:
+        Paginated response with classified leads
+    """
     try:
+        # Validate pagination params
+        page = max(1, page)
+        per_page = min(max(1, per_page), 100)
+        offset = (page - 1) * per_page
+
+        # Build query params
         params = {
-            "limit": limit,
-            "order": "created_at.desc"  # Use created_at (score column may not exist)
+            "limit": per_page,
+            "offset": offset,
+            "order": f"{sort_by}.{sort_order}"
         }
 
         if classification:
@@ -1463,27 +1745,200 @@ async def get_classified_leads(
         if tenant_id:
             params["tenant_id"] = f"eq.{tenant_id}"
 
+        # Get leads
         response = requests.get(
             f"{db.base_url}/classified_leads",
             headers=db.headers,
             params=params
         )
+        leads = response.json() if response.status_code == 200 else []
 
-        leads = response.json()
+        # Filter by score in Python (score column may not exist in all records)
+        if leads and (min_score > 0 or max_score < 100):
+            leads = [
+                l for l in leads
+                if min_score <= l.get("score", 0) <= max_score
+            ]
 
-        # Filter by min_score in Python (in case column doesn't exist in DB)
-        if min_score > 0 and leads:
-            leads = [l for l in leads if l.get("score", 0) >= min_score]
+        # Get total count
+        count_headers = {**db.headers, "Prefer": "count=exact"}
+        count_params = {k: v for k, v in params.items() if k not in ["limit", "offset", "order"]}
+        count_response = requests.head(
+            f"{db.base_url}/classified_leads",
+            headers=count_headers,
+            params=count_params
+        )
+
+        content_range = count_response.headers.get("Content-Range", "0-0/0")
+        try:
+            total = int(content_range.split("/")[-1])
+        except (ValueError, IndexError):
+            total = len(leads)
+
+        total_pages = (total + per_page - 1) // per_page if per_page > 0 else 1
 
         return {
             "success": True,
-            "leads": leads,
-            "count": len(leads)
+            "data": leads,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1,
+                "next_page": page + 1 if page < total_pages else None,
+                "prev_page": page - 1 if page > 1 else None
+            },
+            "filters": {
+                "classification": classification,
+                "tenant_id": tenant_id,
+                "min_score": min_score,
+                "max_score": max_score,
+                "sort_by": sort_by,
+                "sort_order": sort_order
+            }
         }
 
     except Exception as e:
         logger.error(f"Error fetching classified leads: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e), "data": [], "pagination": None}
+
+
+@app.get("/api/history")
+async def get_activity_history(
+    event_type: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    username: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    page: int = 1,
+    per_page: int = 50
+):
+    """
+    Get activity history with pagination.
+    Combines DMs sent, leads processed, and other activities.
+
+    Args:
+        event_type: Filter by type (dm_sent, lead_classified, profile_scraped)
+        tenant_id: Filter by tenant
+        username: Filter by username
+        start_date: Start date filter (ISO format)
+        end_date: End date filter (ISO format)
+        page: Page number
+        per_page: Items per page
+
+    Returns:
+        Paginated activity history
+    """
+    try:
+        page = max(1, page)
+        per_page = min(max(1, per_page), 100)
+        offset = (page - 1) * per_page
+
+        all_history = []
+
+        # Get DMs sent
+        dm_params = {
+            "limit": per_page * 2,  # Fetch more to combine
+            "order": "sent_at.desc"
+        }
+        if tenant_id:
+            dm_params["tenant_id"] = f"eq.{tenant_id}"
+        if username:
+            dm_params["username"] = f"eq.{username}"
+        if start_date:
+            dm_params["sent_at"] = f"gte.{start_date}"
+        if end_date:
+            dm_params["sent_at"] = f"lte.{end_date}"
+
+        dm_response = requests.get(
+            f"{db.base_url}/agentic_instagram_dm_sent",
+            headers=db.headers,
+            params=dm_params
+        )
+
+        if dm_response.status_code == 200:
+            for dm in dm_response.json():
+                all_history.append({
+                    "event_type": "dm_sent",
+                    "timestamp": dm.get("sent_at"),
+                    "username": dm.get("username"),
+                    "details": {
+                        "message_preview": (dm.get("message") or "")[:100] + "..." if dm.get("message") and len(dm.get("message", "")) > 100 else dm.get("message"),
+                        "status": dm.get("status", "sent")
+                    },
+                    "tenant_id": dm.get("tenant_id")
+                })
+
+        # Get classified leads as events
+        if not event_type or event_type == "lead_classified":
+            lead_params = {
+                "limit": per_page * 2,
+                "order": "created_at.desc"
+            }
+            if tenant_id:
+                lead_params["tenant_id"] = f"eq.{tenant_id}"
+            if username:
+                lead_params["username"] = f"eq.{username}"
+
+            leads_response = requests.get(
+                f"{db.base_url}/classified_leads",
+                headers=db.headers,
+                params=lead_params
+            )
+
+            if leads_response.status_code == 200:
+                for lead in leads_response.json():
+                    all_history.append({
+                        "event_type": "lead_classified",
+                        "timestamp": lead.get("created_at"),
+                        "username": lead.get("username"),
+                        "details": {
+                            "classification": lead.get("classification"),
+                            "score": lead.get("score"),
+                            "reasoning": (lead.get("reasoning") or "")[:100]
+                        },
+                        "tenant_id": lead.get("tenant_id")
+                    })
+
+        # Filter by event_type if specified
+        if event_type:
+            all_history = [h for h in all_history if h["event_type"] == event_type]
+
+        # Sort by timestamp descending
+        all_history.sort(key=lambda x: x.get("timestamp") or "", reverse=True)
+
+        # Apply pagination
+        total = len(all_history)
+        paginated = all_history[offset:offset + per_page]
+        total_pages = (total + per_page - 1) // per_page if per_page > 0 else 1
+
+        return {
+            "success": True,
+            "data": paginated,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1,
+                "next_page": page + 1 if page < total_pages else None,
+                "prev_page": page - 1 if page > 1 else None
+            },
+            "filters": {
+                "event_type": event_type,
+                "tenant_id": tenant_id,
+                "username": username,
+                "start_date": start_date,
+                "end_date": end_date
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching history: {e}")
+        return {"success": False, "error": str(e), "data": [], "pagination": None}
 
 
 # ============================================
@@ -2719,7 +3174,9 @@ async def analyze_conversation_context(request: ConversationContextRequest):
         # ============================================
         # REGRA 1: Tags de prospecção = SEMPRE ativar
         # ============================================
-        prospecting_tags = ["prospectado", "abordado", "social_selling", "outbound", "lead_qualificado", "ia-ativa", "ia-call", "ia_ativa", "ativar_ia"]
+        # NOTA: Tags que indicam que o lead FOI PROSPECTADO (recebeu outreach nosso)
+        # NÃO incluir tags de ativação como "ativar_ia", "ia-ativa" - essas são flags de controle
+        prospecting_tags = ["prospectado", "abordado", "social_selling", "outbound", "lead_qualificado", "lead-prospectado-ia"]
         has_prospecting_tag = any(tag in tags_lower for tag in prospecting_tags)
 
         if has_prospecting_tag:
@@ -2860,33 +3317,123 @@ Responda APENAS com o formato JSON:
 
 
 @app.get("/api/health")
-async def health_check():
+async def api_health_check():
     """
-    Health check endpoint.
+    Comprehensive health check endpoint.
 
-    Returns:
-        Status do servidor e conexoes
+    Returns complete system status including:
+    - Server uptime and version
+    - Database connections status
+    - External service integrations
+    - Rate limiter statistics
+    - Request metrics
+    - System resources (CPU, memory)
     """
+    now = datetime.now()
+    uptime_seconds = time.time() - SERVER_START_TIME
+
+    # Calculate uptime in human-readable format
+    days, remainder = divmod(int(uptime_seconds), 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    uptime_str = f"{days}d {hours}h {minutes}m {seconds}s"
+
     health = {
         "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "version": "fase-0",
-        "connections": {}
+        "timestamp": now.isoformat(),
+        "version": "1.0.0",
+        "uptime": {
+            "seconds": int(uptime_seconds),
+            "human": uptime_str,
+            "started_at": datetime.fromtimestamp(SERVER_START_TIME).isoformat()
+        },
+        "connections": {},
+        "rate_limiter": rate_limiter.get_stats(),
+        "metrics": {
+            "total_requests": request_metrics["total_requests"],
+            "successful_requests": request_metrics["successful_requests"],
+            "failed_requests": request_metrics["failed_requests"],
+            "success_rate": round(
+                request_metrics["successful_requests"] / max(1, request_metrics["total_requests"]) * 100, 2
+            ),
+            "last_request": request_metrics["last_request_time"],
+            "top_endpoints": dict(
+                sorted(
+                    request_metrics["requests_by_endpoint"].items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )[:10]
+            ),
+            "status_codes": dict(request_metrics["requests_by_status"])
+        }
     }
 
-    # Check Supabase
+    # Check Supabase connection
     try:
-        from supabase_integration import SupabaseClient
-        sb = SupabaseClient()
-        health["connections"]["supabase"] = "connected"
+        test_response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/",
+            headers={"apikey": SUPABASE_KEY},
+            timeout=5
+        )
+        if test_response.status_code < 500:
+            health["connections"]["supabase"] = {"status": "connected", "latency_ms": int(test_response.elapsed.total_seconds() * 1000)}
+        else:
+            health["connections"]["supabase"] = {"status": "error", "code": test_response.status_code}
+            health["status"] = "degraded"
+    except requests.exceptions.Timeout:
+        health["connections"]["supabase"] = {"status": "timeout"}
+        health["status"] = "degraded"
     except Exception as e:
-        health["connections"]["supabase"] = f"error: {str(e)}"
+        health["connections"]["supabase"] = {"status": "error", "message": str(e)}
+        health["status"] = "degraded"
 
-    # Check GHL
+    # Check GHL configuration
     ghl_key = os.getenv("GHL_API_KEY") or os.getenv("GHL_ACCESS_TOKEN")
-    health["connections"]["ghl"] = "configured" if ghl_key else "not configured"
+    health["connections"]["ghl"] = {"status": "configured" if ghl_key else "not_configured"}
+
+    # Check OpenAI configuration
+    health["connections"]["openai"] = {"status": "configured" if OPENAI_API_KEY else "not_configured"}
+
+    # System resources (if psutil available)
+    try:
+        health["system"] = {
+            "cpu_percent": psutil.cpu_percent(interval=0.1),
+            "memory": {
+                "percent": psutil.virtual_memory().percent,
+                "available_mb": round(psutil.virtual_memory().available / (1024 * 1024), 2)
+            },
+            "disk": {
+                "percent": psutil.disk_usage('/').percent
+            }
+        }
+    except Exception:
+        health["system"] = {"message": "psutil not available"}
 
     return health
+
+
+@app.get("/api/metrics")
+async def get_api_metrics():
+    """
+    Get detailed API metrics and rate limiter stats.
+    Useful for monitoring and dashboards.
+    """
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "rate_limiter": rate_limiter.get_stats(),
+        "requests": {
+            "total": request_metrics["total_requests"],
+            "successful": request_metrics["successful_requests"],
+            "failed": request_metrics["failed_requests"],
+            "success_rate": round(
+                request_metrics["successful_requests"] / max(1, request_metrics["total_requests"]) * 100, 2
+            ),
+            "last_request": request_metrics["last_request_time"]
+        },
+        "endpoints": dict(request_metrics["requests_by_endpoint"]),
+        "status_codes": dict(request_metrics["requests_by_status"]),
+        "uptime_seconds": int(time.time() - SERVER_START_TIME)
+    }
 
 
 # ============================================
