@@ -3503,13 +3503,40 @@ async def get_api_metrics():
 # ============================================
 
 # Import portal service
+PORTAL_SERVICE_AVAILABLE = False
+PORTAL_IMPORT_ERROR = None
+
 try:
     from portal_service import portal_service, LeadSyncData, MessageSyncData, FunnelStage
     PORTAL_SERVICE_AVAILABLE = True
     logger.info("Portal service loaded successfully")
 except ImportError as e:
-    PORTAL_SERVICE_AVAILABLE = False
+    PORTAL_IMPORT_ERROR = str(e)
     logger.warning(f"Portal service not available: {e}")
+except Exception as e:
+    PORTAL_IMPORT_ERROR = str(e)
+    logger.error(f"Portal service error: {e}")
+
+
+@app.get("/api/portal/status")
+async def portal_status():
+    """
+    Verifica status do Portal CRM.
+    Sempre disponível mesmo se portal_service falhar.
+    """
+    return {
+        "portal_service_available": PORTAL_SERVICE_AVAILABLE,
+        "import_error": PORTAL_IMPORT_ERROR,
+        "version": "1.0.0",
+        "endpoints": [
+            "/api/portal/sync/lead",
+            "/api/portal/sync/message",
+            "/api/portal/sync/metrics",
+            "/api/portal/dashboard/summary",
+            "/api/portal/leads",
+            "/api/portal/conversations"
+        ] if PORTAL_SERVICE_AVAILABLE else []
+    }
 
 
 # Pydantic models for Portal API
