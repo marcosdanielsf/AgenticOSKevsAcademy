@@ -1,0 +1,1603 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MOTTIVME Sales - Dashboard v2</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deepest: #06060a;
+            --bg-deep: #0a0a10;
+            --bg-base: #0f0f1a;
+            --bg-elevated: #16162a;
+            --bg-card: #1a1a2e;
+            --bg-card-hover: #222240;
+
+            --accent-primary: #6c5ce7;
+            --accent-primary-glow: rgba(108, 92, 231, 0.3);
+            --accent-secondary: #a29bfe;
+            --accent-success: #00b894;
+            --accent-success-glow: rgba(0, 184, 148, 0.2);
+            --accent-warning: #fdcb6e;
+            --accent-danger: #ff6b6b;
+            --accent-info: #74b9ff;
+
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.7);
+            --text-tertiary: rgba(255, 255, 255, 0.4);
+            --text-muted: rgba(255, 255, 255, 0.25);
+
+            --border-subtle: rgba(255, 255, 255, 0.06);
+            --border-light: rgba(255, 255, 255, 0.1);
+
+            /* Channel Colors */
+            --outbound: #e17055;
+            --inbound: #00b894;
+            --facebook: #4267B2;
+            --instagram: #E1306C;
+            --whatsapp: #25D366;
+            --linkedin: #0077B5;
+            --email: #ea4335;
+            --ads: #fbbc04;
+            --organic: #95a5a6;
+
+            /* Funnel Stage Colors */
+            --stage-prospected: #94a3b8;
+            --stage-lead: #a29bfe;
+            --stage-qualified: #6c5ce7;
+            --stage-scheduled: #74b9ff;
+            --stage-showed: #00b894;
+            --stage-no-show: #ff6b6b;
+            --stage-proposal: #fdcb6e;
+            --stage-won: #00cec9;
+            --stage-lost: #636e72;
+
+            --sidebar-width: 260px;
+            --header-height: 70px;
+
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 24px;
+
+            --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
+            --shadow-glow: 0 0 40px var(--accent-primary-glow);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-deepest);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ===== SIDEBAR ===== */
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: var(--sidebar-width);
+            height: 100vh;
+            background: linear-gradient(180deg, var(--bg-deep) 0%, var(--bg-deepest) 100%);
+            border-right: 1px solid var(--border-subtle);
+            display: flex;
+            flex-direction: column;
+            z-index: 100;
+        }
+
+        .sidebar-header {
+            padding: 28px 24px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 42px;
+            height: 42px;
+            background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            font-size: 18px;
+            box-shadow: var(--shadow-glow);
+        }
+
+        .logo-text {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            font-size: 20px;
+            letter-spacing: -0.5px;
+        }
+
+        .logo-text span {
+            color: var(--accent-primary);
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            padding: 24px 16px;
+            overflow-y: auto;
+        }
+
+        .nav-section {
+            margin-bottom: 28px;
+        }
+
+        .nav-section-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            padding: 0 12px;
+            margin-bottom: 12px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 16px;
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            margin-bottom: 4px;
+        }
+
+        .nav-item:hover {
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background: linear-gradient(90deg, rgba(108, 92, 231, 0.15) 0%, transparent 100%);
+            color: var(--text-primary);
+            border-left: 3px solid var(--accent-primary);
+            margin-left: -3px;
+        }
+
+        .nav-item.active .nav-icon {
+            color: var(--accent-primary);
+        }
+
+        .nav-icon {
+            width: 20px;
+            height: 20px;
+            opacity: 0.7;
+        }
+
+        .nav-item.active .nav-icon {
+            opacity: 1;
+        }
+
+        .nav-badge {
+            margin-left: auto;
+            background: var(--accent-danger);
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .sidebar-footer {
+            padding: 20px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .user-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--bg-elevated);
+            border-radius: var(--radius-md);
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--accent-success) 0%, #00cec9 100%);
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .user-info {
+            flex: 1;
+        }
+
+        .user-name {
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .user-role {
+            font-size: 11px;
+            color: var(--text-tertiary);
+        }
+
+        /* ===== MAIN CONTENT ===== */
+        .main-content {
+            margin-left: var(--sidebar-width);
+            min-height: 100vh;
+            background: var(--bg-base);
+        }
+
+        /* ===== HEADER ===== */
+        .header {
+            height: var(--header-height);
+            padding: 0 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-subtle);
+            background: rgba(15, 15, 26, 0.8);
+            backdrop-filter: blur(20px);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .page-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+        }
+
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--text-tertiary);
+        }
+
+        .breadcrumb span {
+            color: var(--text-secondary);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .period-selector {
+            display: flex;
+            background: var(--bg-elevated);
+            border-radius: var(--radius-md);
+            padding: 4px;
+        }
+
+        .period-btn {
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 500;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .period-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .period-btn.active {
+            background: var(--accent-primary);
+            color: white;
+        }
+
+        .header-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: var(--radius-md);
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .header-btn:hover {
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+
+        /* ===== DASHBOARD CONTENT ===== */
+        .dashboard {
+            padding: 32px;
+        }
+
+        /* ===== SOURCE TOGGLE ===== */
+        .source-toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .source-toggle {
+            display: flex;
+            background: var(--bg-card);
+            border-radius: var(--radius-lg);
+            padding: 6px;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .source-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 24px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 600;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .source-btn .icon {
+            font-size: 18px;
+        }
+
+        .source-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-elevated);
+        }
+
+        .source-btn.active {
+            color: white;
+        }
+
+        .source-btn.active.outbound {
+            background: linear-gradient(135deg, var(--outbound) 0%, #fab1a0 100%);
+        }
+
+        .source-btn.active.inbound {
+            background: linear-gradient(135deg, var(--inbound) 0%, #55efc4 100%);
+        }
+
+        .source-btn.active.all {
+            background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+        }
+
+        .source-btn .count {
+            background: rgba(255,255,255,0.2);
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+
+        /* ===== KPI CARDS ===== */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 16px;
+            margin-bottom: 28px;
+        }
+
+        .kpi-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--card-accent, var(--accent-primary));
+        }
+
+        .kpi-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-card);
+            border-color: var(--border-light);
+        }
+
+        .kpi-card.prospected { --card-accent: var(--stage-prospected); }
+        .kpi-card.lead { --card-accent: var(--stage-lead); }
+        .kpi-card.qualified { --card-accent: var(--stage-qualified); }
+        .kpi-card.scheduled { --card-accent: var(--stage-scheduled); }
+        .kpi-card.showed { --card-accent: var(--stage-showed); }
+        .kpi-card.won { --card-accent: var(--stage-won); }
+
+        .kpi-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .kpi-icon {
+            width: 40px;
+            height: 40px;
+            background: rgba(108, 92, 231, 0.1);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .kpi-card.prospected .kpi-icon { background: rgba(148, 163, 184, 0.15); }
+        .kpi-card.lead .kpi-icon { background: rgba(162, 155, 254, 0.15); }
+        .kpi-card.qualified .kpi-icon { background: rgba(108, 92, 231, 0.15); }
+        .kpi-card.scheduled .kpi-icon { background: rgba(116, 185, 255, 0.15); }
+        .kpi-card.showed .kpi-icon { background: rgba(0, 184, 148, 0.15); }
+        .kpi-card.won .kpi-icon { background: rgba(0, 206, 201, 0.15); }
+
+        .kpi-trend {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 8px;
+            border-radius: 12px;
+        }
+
+        .kpi-trend.up {
+            background: rgba(0, 184, 148, 0.15);
+            color: var(--accent-success);
+        }
+
+        .kpi-trend.down {
+            background: rgba(255, 107, 107, 0.15);
+            color: var(--accent-danger);
+        }
+
+        .kpi-value {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 32px;
+            font-weight: 700;
+            letter-spacing: -1px;
+            margin-bottom: 4px;
+        }
+
+        .kpi-label {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .kpi-sublabel {
+            font-size: 12px;
+            color: var(--accent-success);
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .kpi-sublabel.revenue {
+            color: var(--accent-warning);
+            font-weight: 600;
+        }
+
+        /* ===== MAIN GRID ===== */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1.5fr 1fr;
+            gap: 24px;
+            margin-bottom: 28px;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+
+        .card-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 16px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card-title .icon {
+            font-size: 18px;
+        }
+
+        .card-subtitle {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin-top: 4px;
+        }
+
+        .card-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .card-btn {
+            padding: 6px 12px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .card-btn:hover {
+            background: var(--bg-card-hover);
+            color: var(--text-primary);
+        }
+
+        /* ===== FUNNEL ===== */
+        .funnel-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .funnel-section {
+            margin-bottom: 8px;
+        }
+
+        .funnel-section-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .funnel-section-title .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .funnel-section-title .dot.outbound { background: var(--outbound); }
+        .funnel-section-title .dot.inbound { background: var(--inbound); }
+        .funnel-section-title .dot.conversion { background: var(--accent-primary); }
+
+        .funnel-stage {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .funnel-label {
+            width: 90px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            text-align: right;
+        }
+
+        .funnel-bar-container {
+            flex: 1;
+            height: 32px;
+            background: var(--bg-elevated);
+            border-radius: var(--radius-sm);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .funnel-bar {
+            height: 100%;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            font-weight: 600;
+            font-size: 13px;
+            color: white;
+            transition: width 1s ease-out;
+            min-width: 40px;
+        }
+
+        .funnel-bar.prospected {
+            background: linear-gradient(90deg, #64748b 0%, #94a3b8 100%);
+        }
+
+        .funnel-bar.lead {
+            background: linear-gradient(90deg, #8b5cf6 0%, #a78bfa 100%);
+        }
+
+        .funnel-bar.qualified {
+            background: linear-gradient(90deg, #6c5ce7 0%, #a29bfe 100%);
+        }
+
+        .funnel-bar.scheduled {
+            background: linear-gradient(90deg, #0284c7 0%, #38bdf8 100%);
+        }
+
+        .funnel-bar.showed {
+            background: linear-gradient(90deg, #059669 0%, #34d399 100%);
+        }
+
+        .funnel-bar.no-show {
+            background: linear-gradient(90deg, #dc2626 0%, #f87171 100%);
+        }
+
+        .funnel-bar.proposal {
+            background: linear-gradient(90deg, #d97706 0%, #fbbf24 100%);
+        }
+
+        .funnel-bar.won {
+            background: linear-gradient(90deg, #0891b2 0%, #22d3ee 100%);
+        }
+
+        .funnel-stats {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 100px;
+        }
+
+        .funnel-value {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            min-width: 28px;
+        }
+
+        .funnel-rate {
+            font-size: 11px;
+            color: var(--accent-success);
+            background: rgba(0, 184, 148, 0.1);
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+
+        .funnel-arrow {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 12px;
+            padding: 4px 0;
+        }
+
+        /* ===== CHANNEL BREAKDOWN ===== */
+        .channel-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .channel-section {
+            background: var(--bg-elevated);
+            border-radius: var(--radius-md);
+            padding: 16px;
+        }
+
+        .channel-section-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .channel-section-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .channel-section-icon.outbound {
+            background: rgba(225, 112, 85, 0.15);
+        }
+
+        .channel-section-icon.inbound {
+            background: rgba(0, 184, 148, 0.15);
+        }
+
+        .channel-section-title {
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .channel-section-count {
+            margin-left: auto;
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            font-size: 18px;
+        }
+
+        .channel-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .channel-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            background: var(--bg-card);
+            border-radius: var(--radius-sm);
+            transition: all 0.2s ease;
+        }
+
+        .channel-item:hover {
+            background: var(--bg-card-hover);
+        }
+
+        .channel-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .channel-dot.instagram { background: var(--instagram); }
+        .channel-dot.linkedin { background: var(--linkedin); }
+        .channel-dot.email { background: var(--email); }
+        .channel-dot.facebook { background: var(--facebook); }
+        .channel-dot.whatsapp { background: var(--whatsapp); }
+        .channel-dot.ads { background: var(--ads); }
+        .channel-dot.referral { background: var(--accent-info); }
+        .channel-dot.organic { background: var(--organic); }
+
+        .channel-name {
+            flex: 1;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .channel-count {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .channel-percent {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            min-width: 36px;
+            text-align: right;
+        }
+
+        /* ===== LEADS TABLE ===== */
+        .table-container {
+            overflow-x: auto;
+        }
+
+        .leads-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .leads-table th {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-tertiary);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .leads-table td {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border-subtle);
+            font-size: 13px;
+        }
+
+        .leads-table tbody tr {
+            transition: all 0.2s ease;
+        }
+
+        .leads-table tbody tr:hover {
+            background: var(--bg-elevated);
+        }
+
+        .lead-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .lead-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 12px;
+            background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+        }
+
+        .lead-avatar.outbound { background: linear-gradient(135deg, var(--outbound) 0%, #fab1a0 100%); }
+        .lead-avatar.inbound { background: linear-gradient(135deg, var(--inbound) 0%, #55efc4 100%); }
+
+        .lead-name {
+            font-weight: 600;
+        }
+
+        .lead-email {
+            font-size: 11px;
+            color: var(--text-tertiary);
+        }
+
+        .source-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px;
+            border-radius: 16px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .source-badge.outbound {
+            background: rgba(225, 112, 85, 0.15);
+            color: var(--outbound);
+        }
+
+        .source-badge.inbound {
+            background: rgba(0, 184, 148, 0.15);
+            color: var(--inbound);
+        }
+
+        .channel-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 10px;
+            border-radius: 16px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .channel-badge.instagram {
+            background: rgba(225, 48, 108, 0.15);
+            color: var(--instagram);
+        }
+
+        .channel-badge.facebook {
+            background: rgba(66, 103, 178, 0.15);
+            color: var(--facebook);
+        }
+
+        .channel-badge.ads {
+            background: rgba(251, 188, 4, 0.15);
+            color: var(--ads);
+        }
+
+        .channel-badge.whatsapp {
+            background: rgba(37, 211, 102, 0.15);
+            color: var(--whatsapp);
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 10px;
+            border-radius: 16px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .status-badge.prospected { background: rgba(148, 163, 184, 0.15); color: var(--stage-prospected); }
+        .status-badge.lead { background: rgba(162, 155, 254, 0.15); color: var(--stage-lead); }
+        .status-badge.qualified { background: rgba(108, 92, 231, 0.15); color: var(--stage-qualified); }
+        .status-badge.scheduled { background: rgba(116, 185, 255, 0.15); color: var(--stage-scheduled); }
+        .status-badge.showed { background: rgba(0, 184, 148, 0.15); color: var(--stage-showed); }
+        .status-badge.won { background: rgba(0, 206, 201, 0.15); color: var(--stage-won); }
+
+        .temp-badge {
+            font-size: 16px;
+        }
+
+        .lead-date {
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+
+        .lead-actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        .action-btn {
+            width: 30px;
+            height: 30px;
+            border-radius: var(--radius-sm);
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-tertiary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .action-btn:hover {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+            color: white;
+        }
+
+        /* ===== ANIMATIONS ===== */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .kpi-card {
+            animation: fadeInUp 0.5s ease forwards;
+            opacity: 0;
+        }
+
+        .kpi-card:nth-child(1) { animation-delay: 0.1s; }
+        .kpi-card:nth-child(2) { animation-delay: 0.15s; }
+        .kpi-card:nth-child(3) { animation-delay: 0.2s; }
+        .kpi-card:nth-child(4) { animation-delay: 0.25s; }
+        .kpi-card:nth-child(5) { animation-delay: 0.3s; }
+
+        .card {
+            animation: fadeInUp 0.5s ease forwards;
+            animation-delay: 0.4s;
+            opacity: 0;
+        }
+
+        .leads-table-card {
+            animation-delay: 0.5s;
+        }
+
+        /* ===== SCROLLBAR ===== */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-deep);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--bg-elevated);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--bg-card);
+        }
+    </style>
+</head>
+<body>
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <div class="logo-icon">M</div>
+                <div class="logo-text">MOTTIV<span>ME</span></div>
+            </div>
+        </div>
+
+        <nav class="sidebar-nav">
+            <div class="nav-section">
+                <div class="nav-section-title">Principal</div>
+                <a href="#" class="nav-item active">
+                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"></path>
+                    </svg>
+                    Dashboard
+                </a>
+                <a href="#" class="nav-item">
+                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
+                    Leads
+                    <span class="nav-badge">127</span>
+                </a>
+                <a href="#" class="nav-item">
+                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                    </svg>
+                    Conversas
+                    <span class="nav-badge">5</span>
+                </a>
+                <a href="#" class="nav-item">
+                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                    </svg>
+                    Métricas
+                </a>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-section-title">Tráfego</div>
+                <a href="#" class="nav-item">
+                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                    </svg>
+                    ROI & ROAS
+                </a>
+                <a href="#" class="nav-item">
+                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Campanhas
+                </a>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-section-title">Sistema</div>
+                <a href="#" class="nav-item">
+                    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
+                    Configurações
+                </a>
+            </div>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="user-card">
+                <div class="user-avatar">DL</div>
+                <div class="user-info">
+                    <div class="user-name">Dr. Luiz Augusto</div>
+                    <div class="user-role">Instituto Amare</div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+        <!-- HEADER -->
+        <header class="header">
+            <div class="header-left">
+                <h1 class="page-title">Dashboard</h1>
+                <div class="breadcrumb">
+                    <span>Growth OS</span> / Últimos 7 dias
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="period-selector">
+                    <button class="period-btn">Hoje</button>
+                    <button class="period-btn active">7 dias</button>
+                    <button class="period-btn">30 dias</button>
+                    <button class="period-btn">Mês</button>
+                </div>
+                <button class="header-btn">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- DASHBOARD -->
+        <div class="dashboard">
+            <!-- SOURCE TOGGLE -->
+            <div class="source-toggle-container">
+                <div class="source-toggle">
+                    <button class="source-btn active all">
+                        <span class="icon">📊</span>
+                        Todos
+                        <span class="count">127</span>
+                    </button>
+                    <button class="source-btn outbound">
+                        <span class="icon">🎯</span>
+                        Outbound
+                        <span class="count">85</span>
+                    </button>
+                    <button class="source-btn inbound">
+                        <span class="icon">📥</span>
+                        Inbound
+                        <span class="count">42</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- KPI CARDS -->
+            <div class="kpi-grid">
+                <div class="kpi-card prospected">
+                    <div class="kpi-header">
+                        <div class="kpi-icon">🎯</div>
+                        <div class="kpi-trend up">+23%</div>
+                    </div>
+                    <div class="kpi-value">85</div>
+                    <div class="kpi-label">Prospectados</div>
+                    <div class="kpi-sublabel">Outbound ativo</div>
+                </div>
+
+                <div class="kpi-card lead">
+                    <div class="kpi-header">
+                        <div class="kpi-icon">👤</div>
+                        <div class="kpi-trend up">+18%</div>
+                    </div>
+                    <div class="kpi-value">42</div>
+                    <div class="kpi-label">Leads</div>
+                    <div class="kpi-sublabel">Inbound + Responderam</div>
+                </div>
+
+                <div class="kpi-card qualified">
+                    <div class="kpi-header">
+                        <div class="kpi-icon">✓</div>
+                        <div class="kpi-trend up">+15%</div>
+                    </div>
+                    <div class="kpi-value">28</div>
+                    <div class="kpi-label">Qualificados</div>
+                    <div class="kpi-sublabel">67% taxa</div>
+                </div>
+
+                <div class="kpi-card scheduled">
+                    <div class="kpi-header">
+                        <div class="kpi-icon">📅</div>
+                        <div class="kpi-trend up">+12%</div>
+                    </div>
+                    <div class="kpi-value">15</div>
+                    <div class="kpi-label">Agendados</div>
+                    <div class="kpi-sublabel">54% taxa</div>
+                </div>
+
+                <div class="kpi-card won">
+                    <div class="kpi-header">
+                        <div class="kpi-icon">💰</div>
+                        <div class="kpi-trend up">+25%</div>
+                    </div>
+                    <div class="kpi-value">5</div>
+                    <div class="kpi-label">Vendas</div>
+                    <div class="kpi-sublabel revenue">R$ 24.985</div>
+                </div>
+            </div>
+
+            <!-- MAIN GRID -->
+            <div class="main-grid">
+                <!-- FUNNEL -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h3 class="card-title">
+                                <span class="icon">📊</span>
+                                Funil de Vendas
+                            </h3>
+                            <div class="card-subtitle">Conversão por etapa do Growth OS</div>
+                        </div>
+                        <div class="card-actions">
+                            <button class="card-btn">Detalhes</button>
+                        </div>
+                    </div>
+
+                    <div class="funnel-container">
+                        <!-- OUTBOUND SECTION -->
+                        <div class="funnel-section">
+                            <div class="funnel-section-title">
+                                <span class="dot outbound"></span>
+                                OUTBOUND (Social Selling)
+                            </div>
+                            <div class="funnel-stage">
+                                <div class="funnel-label">Prospectados</div>
+                                <div class="funnel-bar-container">
+                                    <div class="funnel-bar prospected" style="width: 100%;">85</div>
+                                </div>
+                                <div class="funnel-stats">
+                                    <span class="funnel-value">85</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="funnel-arrow">↓ responderam (33%)</div>
+
+                        <!-- INBOUND SECTION -->
+                        <div class="funnel-section">
+                            <div class="funnel-section-title">
+                                <span class="dot inbound"></span>
+                                INBOUND (Tráfego + Respostas)
+                            </div>
+                            <div class="funnel-stage">
+                                <div class="funnel-label">Leads</div>
+                                <div class="funnel-bar-container">
+                                    <div class="funnel-bar lead" style="width: 85%;">42</div>
+                                </div>
+                                <div class="funnel-stats">
+                                    <span class="funnel-value">42</span>
+                                    <span class="funnel-rate">28 + 14</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="funnel-arrow">↓ qualificados</div>
+
+                        <!-- CONVERSION SECTION -->
+                        <div class="funnel-section">
+                            <div class="funnel-section-title">
+                                <span class="dot conversion"></span>
+                                CONVERSÃO
+                            </div>
+                            <div class="funnel-stage">
+                                <div class="funnel-label">Qualificados</div>
+                                <div class="funnel-bar-container">
+                                    <div class="funnel-bar qualified" style="width: 56%;">28</div>
+                                </div>
+                                <div class="funnel-stats">
+                                    <span class="funnel-value">28</span>
+                                    <span class="funnel-rate">67%</span>
+                                </div>
+                            </div>
+                            <div class="funnel-stage">
+                                <div class="funnel-label">Agendados</div>
+                                <div class="funnel-bar-container">
+                                    <div class="funnel-bar scheduled" style="width: 30%;">15</div>
+                                </div>
+                                <div class="funnel-stats">
+                                    <span class="funnel-value">15</span>
+                                    <span class="funnel-rate">54%</span>
+                                </div>
+                            </div>
+                            <div class="funnel-stage">
+                                <div class="funnel-label">Compareceram</div>
+                                <div class="funnel-bar-container">
+                                    <div class="funnel-bar showed" style="width: 24%;">12</div>
+                                </div>
+                                <div class="funnel-stats">
+                                    <span class="funnel-value">12</span>
+                                    <span class="funnel-rate">80%</span>
+                                </div>
+                            </div>
+                            <div class="funnel-stage">
+                                <div class="funnel-label">No-Show</div>
+                                <div class="funnel-bar-container">
+                                    <div class="funnel-bar no-show" style="width: 6%;">3</div>
+                                </div>
+                                <div class="funnel-stats">
+                                    <span class="funnel-value" style="color: var(--accent-danger);">3</span>
+                                </div>
+                            </div>
+                            <div class="funnel-stage">
+                                <div class="funnel-label">Propostas</div>
+                                <div class="funnel-bar-container">
+                                    <div class="funnel-bar proposal" style="width: 16%;">8</div>
+                                </div>
+                                <div class="funnel-stats">
+                                    <span class="funnel-value">8</span>
+                                    <span class="funnel-rate">67%</span>
+                                </div>
+                            </div>
+                            <div class="funnel-stage">
+                                <div class="funnel-label">Vendas</div>
+                                <div class="funnel-bar-container">
+                                    <div class="funnel-bar won" style="width: 10%;">5</div>
+                                </div>
+                                <div class="funnel-stats">
+                                    <span class="funnel-value">5</span>
+                                    <span class="funnel-rate">63%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CHANNEL BREAKDOWN -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h3 class="card-title">
+                                <span class="icon">📱</span>
+                                Canais
+                            </h3>
+                            <div class="card-subtitle">Origem dos leads</div>
+                        </div>
+                    </div>
+
+                    <div class="channel-grid">
+                        <!-- OUTBOUND -->
+                        <div class="channel-section">
+                            <div class="channel-section-header">
+                                <div class="channel-section-icon outbound">🎯</div>
+                                <div class="channel-section-title">Outbound</div>
+                                <div class="channel-section-count">85</div>
+                            </div>
+                            <div class="channel-list">
+                                <div class="channel-item">
+                                    <div class="channel-dot instagram"></div>
+                                    <div class="channel-name">Instagram DM</div>
+                                    <div class="channel-count">52</div>
+                                    <div class="channel-percent">61%</div>
+                                </div>
+                                <div class="channel-item">
+                                    <div class="channel-dot linkedin"></div>
+                                    <div class="channel-name">LinkedIn</div>
+                                    <div class="channel-count">18</div>
+                                    <div class="channel-percent">21%</div>
+                                </div>
+                                <div class="channel-item">
+                                    <div class="channel-dot email"></div>
+                                    <div class="channel-name">Cold Email</div>
+                                    <div class="channel-count">15</div>
+                                    <div class="channel-percent">18%</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- INBOUND -->
+                        <div class="channel-section">
+                            <div class="channel-section-header">
+                                <div class="channel-section-icon inbound">📥</div>
+                                <div class="channel-section-title">Inbound</div>
+                                <div class="channel-section-count">42</div>
+                            </div>
+                            <div class="channel-list">
+                                <div class="channel-item">
+                                    <div class="channel-dot ads"></div>
+                                    <div class="channel-name">Facebook Ads</div>
+                                    <div class="channel-count">28</div>
+                                    <div class="channel-percent">67%</div>
+                                </div>
+                                <div class="channel-item">
+                                    <div class="channel-dot whatsapp"></div>
+                                    <div class="channel-name">WhatsApp</div>
+                                    <div class="channel-count">8</div>
+                                    <div class="channel-percent">19%</div>
+                                </div>
+                                <div class="channel-item">
+                                    <div class="channel-dot referral"></div>
+                                    <div class="channel-name">Indicação</div>
+                                    <div class="channel-count">4</div>
+                                    <div class="channel-percent">10%</div>
+                                </div>
+                                <div class="channel-item">
+                                    <div class="channel-dot organic"></div>
+                                    <div class="channel-name">Orgânico</div>
+                                    <div class="channel-count">2</div>
+                                    <div class="channel-percent">5%</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LEADS TABLE -->
+            <div class="card leads-table-card">
+                <div class="card-header">
+                    <div>
+                        <h3 class="card-title">
+                            <span class="icon">👥</span>
+                            Leads Recentes
+                        </h3>
+                        <div class="card-subtitle">Últimas interações</div>
+                    </div>
+                    <div class="card-actions">
+                        <button class="card-btn">Filtrar</button>
+                        <button class="card-btn">Exportar</button>
+                        <button class="card-btn" style="background: var(--accent-primary); border-color: var(--accent-primary); color: white;">Ver Todos</button>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table class="leads-table">
+                        <thead>
+                            <tr>
+                                <th>Lead</th>
+                                <th>Tipo</th>
+                                <th>Canal</th>
+                                <th>Etapa</th>
+                                <th>Temp.</th>
+                                <th>Data</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <div class="lead-info">
+                                        <div class="lead-avatar outbound">MS</div>
+                                        <div>
+                                            <div class="lead-name">Maria Silva</div>
+                                            <div class="lead-email">@mariasilva_oficial</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="source-badge outbound">🎯 Outbound</span></td>
+                                <td><span class="channel-badge instagram">📸 Instagram</span></td>
+                                <td><span class="status-badge qualified">✓ Qualificado</span></td>
+                                <td><span class="temp-badge">🔥</span></td>
+                                <td class="lead-date">08/01 14:32</td>
+                                <td>
+                                    <div class="lead-actions">
+                                        <button class="action-btn">👁️</button>
+                                        <button class="action-btn">💬</button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div class="lead-info">
+                                        <div class="lead-avatar inbound">JS</div>
+                                        <div>
+                                            <div class="lead-name">João Santos</div>
+                                            <div class="lead-email">joao.santos@gmail.com</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="source-badge inbound">📥 Inbound</span></td>
+                                <td><span class="channel-badge ads">📢 Facebook Ads</span></td>
+                                <td><span class="status-badge lead">● Lead</span></td>
+                                <td><span class="temp-badge">🌡️</span></td>
+                                <td class="lead-date">08/01 12:15</td>
+                                <td>
+                                    <div class="lead-actions">
+                                        <button class="action-btn">👁️</button>
+                                        <button class="action-btn">💬</button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div class="lead-info">
+                                        <div class="lead-avatar inbound">AC</div>
+                                        <div>
+                                            <div class="lead-name">Ana Costa</div>
+                                            <div class="lead-email">+55 11 99999-0000</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="source-badge inbound">📥 Inbound</span></td>
+                                <td><span class="channel-badge whatsapp">💬 WhatsApp</span></td>
+                                <td><span class="status-badge scheduled">📅 Agendado</span></td>
+                                <td><span class="temp-badge">🔥</span></td>
+                                <td class="lead-date">07/01 18:45</td>
+                                <td>
+                                    <div class="lead-actions">
+                                        <button class="action-btn">👁️</button>
+                                        <button class="action-btn">💬</button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div class="lead-info">
+                                        <div class="lead-avatar outbound">PO</div>
+                                        <div>
+                                            <div class="lead-name">Paula Oliveira</div>
+                                            <div class="lead-email">@paulaoliveira</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="source-badge outbound">🎯 Outbound</span></td>
+                                <td><span class="channel-badge instagram">📸 Instagram</span></td>
+                                <td><span class="status-badge won">★ Fechado</span></td>
+                                <td><span class="temp-badge">🔥</span></td>
+                                <td class="lead-date">07/01 10:20</td>
+                                <td>
+                                    <div class="lead-actions">
+                                        <button class="action-btn">👁️</button>
+                                        <button class="action-btn">💬</button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div class="lead-info">
+                                        <div class="lead-avatar outbound">RF</div>
+                                        <div>
+                                            <div class="lead-name">Roberto Ferreira</div>
+                                            <div class="lead-email">@roberto.ferreira</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="source-badge outbound">🎯 Outbound</span></td>
+                                <td><span class="channel-badge instagram">📸 Instagram</span></td>
+                                <td><span class="status-badge prospected">○ Prospectado</span></td>
+                                <td><span class="temp-badge">❄️</span></td>
+                                <td class="lead-date">06/01 16:08</td>
+                                <td>
+                                    <div class="lead-actions">
+                                        <button class="action-btn">👁️</button>
+                                        <button class="action-btn">💬</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Toggle source buttons
+        document.querySelectorAll('.source-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.source-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+
+        // Period selector
+        document.querySelectorAll('.period-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+    </script>
+</body>
+</html>

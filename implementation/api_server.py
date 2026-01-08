@@ -3499,6 +3499,461 @@ async def get_api_metrics():
 
 
 # ============================================
+# PORTAL CRM - ENDPOINTS
+# ============================================
+
+# Import portal service
+try:
+    from portal_service import portal_service, LeadSyncData, MessageSyncData, FunnelStage
+    PORTAL_SERVICE_AVAILABLE = True
+    logger.info("Portal service loaded successfully")
+except ImportError as e:
+    PORTAL_SERVICE_AVAILABLE = False
+    logger.warning(f"Portal service not available: {e}")
+
+
+# Pydantic models for Portal API
+class PortalLeadSyncRequest(BaseModel):
+    """Request para sincronizar lead do GHL"""
+    ghl_contact_id: str
+    location_id: str
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    instagram_username: Optional[str] = None
+    source_channel: Optional[str] = None
+    source_campaign: Optional[str] = None
+    funnel_stage: Optional[str] = "lead"
+    lead_temperature: Optional[str] = "cold"
+    lead_score: Optional[int] = 0
+    tags: Optional[List[str]] = None
+    custom_fields: Optional[Dict] = None
+
+
+class PortalMessageSyncRequest(BaseModel):
+    """Request para sincronizar mensagem do GHL"""
+    ghl_conversation_id: str
+    ghl_message_id: str
+    location_id: str
+    ghl_contact_id: str
+    content: str
+    direction: str  # inbound, outbound
+    channel: str  # instagram, whatsapp, sms, email
+    sent_at: str  # ISO datetime
+    sender_name: Optional[str] = None
+    is_from_ai: Optional[bool] = False
+    content_type: Optional[str] = "text"
+    media_url: Optional[str] = None
+
+
+class PortalMetricsRequest(BaseModel):
+    """Request para calcular métricas"""
+    location_id: str
+    date: Optional[str] = None  # ISO date, default: today
+
+
+# ---- SYNC ENDPOINTS ----
+
+@app.post("/api/portal/sync/lead")
+async def portal_sync_lead(request: PortalLeadSyncRequest):
+    """
+    Sincroniza um lead do GHL para o Supabase.
+    Chamado pelo n8n quando um contato é criado/atualizado no GHL.
+
+    Cria ou atualiza o lead na tabela growth_leads.
+    """
+    if not PORTAL_SERVICE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Portal service not available")
+
+    try:
+        # Garantir que tenant existe
+        portal_service.ensure_tenant_exists(request.location_id)
+
+        # Converter para dataclass
+        lead_data = LeadSyncData(
+            ghl_contact_id=request.ghl_contact_id,
+            location_id=request.location_id,
+            name=request.name,
+            email=request.email,
+            phone=request.phone,
+            instagram_username=request.instagram_username,
+            source_channel=request.source_channel,
+            source_campaign=request.source_campaign,
+            funnel_stage=request.funnel_stage or "lead",
+            lead_temperature=request.lead_temperature or "cold",
+            lead_score=request.lead_score or 0,
+            tags=request.tags,
+            custom_fields=request.custom_fields
+        )
+
+        result = portal_service.sync_lead(lead_data)
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in portal sync lead: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/portal/sync/message")
+async def portal_sync_message(request: PortalMessageSyncRequest):
+    """
+    Sincroniza uma mensagem do GHL para o Supabase.
+    Chamado pelo n8n quando uma mensagem é recebida/enviada.
+
+    Cria/atualiza conversa e adiciona mensagem.
+    """
+    if not PORTAL_SERVICE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Portal service not available")
+
+    try:
+        # Parse datetime
+        try:
+            sent_at = datetime.fromisoformat(request.sent_at.replace('Z', '+00:00'))
+        except:
+            sent_at = datetime.now()
+
+        msg_data = MessageSyncData(
+            ghl_conversation_id=request.ghl_conversation_id,
+            ghl_message_id=request.ghl_message_id,
+            location_id=request.location_id,
+            ghl_contact_id=request.ghl_contact_id,
+            content=request.content,
+            direction=request.direction,
+            channel=request.channel,
+            sent_at=sent_at,
+            sender_name=request.sender_name,
+            is_from_ai=request.is_from_ai or False,
+            content_type=request.content_type or "text",
+            media_url=request.media_url
+        )
+
+        result = portal_service.sync_message(msg_data)
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in portal sync message: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/portal/sync/metrics")
+async def portal_calculate_metrics(request: PortalMetricsRequest):
+    """
+    Calcula métricas diárias para um tenant.
+    Chamado pelo n8n via cron diário.
+
+    Popula portal_metrics_daily com breakdown outbound/inbound.
+    """
+    if not PORTAL_SERVICE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Portal service not available")
+
+    try:
+        from datetime import date as date_type
+
+        target_date = None
+        if request.date:
+            target_date = date_type.fromisoformat(request.date)
+
+        result = portal_service.calculate_daily_metrics(
+            location_id=request.location_id,
+            target_date=target_date
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"Error calculating metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---- DASHBOARD ENDPOINTS ----
+
+@app.get("/api/portal/dashboard/summary")
+async def portal_dashboard_summary(
+    location_id: str,
+    period: str = "30d"
+):
+    """
+    Obtém resumo do dashboard para um tenant.
+
+    Query params:
+    - location_id: ID do tenant (GHL location)
+    - period: 7d, 30d, 90d (default: 30d)
+
+    Returns:
+    - KPIs do funil (prospected, leads, qualified, scheduled, showed, won, lost)
+    - Breakdown outbound vs inbound
+    - Revenue total e ticket médio
+    """
+    if not PORTAL_SERVICE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Portal service not available")
+
+    try:
+        # Parse period
+        period_days = {
+            "7d": 7,
+            "30d": 30,
+            "90d": 90
+        }.get(period, 30)
+
+        result = portal_service.get_dashboard_summary(
+            location_id=location_id,
+            period_days=period_days
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting dashboard: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/portal/dashboard/funnel")
+async def portal_dashboard_funnel(
+    location_id: str,
+    period: str = "30d",
+    source_type: Optional[str] = None
+):
+    """
+    Obtém dados do funil de vendas.
+
+    Query params:
+    - location_id: ID do tenant
+    - period: 7d, 30d, 90d
+    - source_type: outbound, inbound, null (todos)
+
+    Returns:
+    - Contagem por etapa do funil
+    - Taxas de conversão entre etapas
+    """
+    if not PORTAL_SERVICE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Portal service not available")
+
+    try:
+        period_days = {"7d": 7, "30d": 30, "90d": 90}.get(period, 30)
+
+        result = portal_service.get_dashboard_summary(
+            location_id=location_id,
+            period_days=period_days
+        )
+
+        # Se source_type especificado, filtrar dados
+        if source_type and result.get("success") and result.get("data"):
+            # Adicionar filtro específico aqui se necessário
+            result["source_type_filter"] = source_type
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting funnel: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---- LEADS ENDPOINTS ----
+
+@app.get("/api/portal/leads")
+async def portal_list_leads(
+    location_id: str,
+    page: int = 1,
+    limit: int = 20,
+    stage: Optional[str] = None,
+    source_type: Optional[str] = None,
+    search: Optional[str] = None
+):
+    """
+    Lista leads de um tenant com paginação e filtros.
+
+    Query params:
+    - location_id: ID do tenant
+    - page: Página atual (default: 1)
+    - limit: Itens por página (default: 20, max: 100)
+    - stage: Filtrar por etapa (prospected, lead, qualified, scheduled, showed, won, lost)
+    - source_type: outbound ou inbound
+    - search: Busca por nome ou email
+
+    Returns:
+    - Lista de leads
+    - Informações de paginação
+    """
+    if not PORTAL_SERVICE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Portal service not available")
+
+    try:
+        # Validar limit
+        limit = min(limit, 100)
+
+        result = portal_service.get_leads(
+            location_id=location_id,
+            page=page,
+            limit=limit,
+            stage=stage,
+            source_type=source_type,
+            search=search
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"Error listing leads: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/portal/leads/{lead_id}")
+async def portal_get_lead(
+    lead_id: str,
+    location_id: str
+):
+    """
+    Obtém detalhes completos de um lead.
+
+    Path params:
+    - lead_id: ID do lead
+
+    Query params:
+    - location_id: ID do tenant (para validação)
+
+    Returns:
+    - Dados completos do lead
+    - Conversas recentes
+    - Atividades recentes
+    """
+    if not PORTAL_SERVICE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Portal service not available")
+
+    try:
+        result = portal_service.get_lead_detail(
+            location_id=location_id,
+            lead_id=lead_id
+        )
+
+        if not result.get("success"):
+            raise HTTPException(status_code=404, detail=result.get("error", "Lead not found"))
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting lead: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---- CONVERSATIONS ENDPOINTS ----
+
+@app.get("/api/portal/conversations")
+async def portal_list_conversations(
+    location_id: str,
+    page: int = 1,
+    limit: int = 20,
+    channel: Optional[str] = None,
+    status: Optional[str] = None
+):
+    """
+    Lista conversas de um tenant.
+
+    Query params:
+    - location_id: ID do tenant
+    - page: Página atual
+    - limit: Itens por página
+    - channel: instagram, whatsapp, sms, email
+    - status: open, closed
+
+    Returns:
+    - Lista de conversas com dados do lead
+    - Informações de paginação
+    """
+    if not PORTAL_SERVICE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Portal service not available")
+
+    try:
+        limit = min(limit, 100)
+
+        result = portal_service.get_conversations(
+            location_id=location_id,
+            page=page,
+            limit=limit,
+            channel=channel,
+            status=status
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"Error listing conversations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/portal/conversations/{conversation_id}/messages")
+async def portal_get_messages(
+    conversation_id: str,
+    location_id: str,
+    limit: int = 50
+):
+    """
+    Obtém mensagens de uma conversa.
+
+    Path params:
+    - conversation_id: ID da conversa
+
+    Query params:
+    - location_id: ID do tenant
+    - limit: Máximo de mensagens (default: 50)
+
+    Returns:
+    - Lista de mensagens ordenadas cronologicamente
+    """
+    if not PORTAL_SERVICE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Portal service not available")
+
+    try:
+        result = portal_service.get_conversation_messages(
+            location_id=location_id,
+            conversation_id=conversation_id,
+            limit=limit
+        )
+
+        if not result.get("success"):
+            raise HTTPException(status_code=404, detail=result.get("error", "Conversation not found"))
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting messages: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---- TENANT ENDPOINTS ----
+
+@app.post("/api/portal/tenant/ensure")
+async def portal_ensure_tenant(
+    location_id: str,
+    client_name: Optional[str] = None
+):
+    """
+    Garante que um tenant existe.
+    Cria se não existir.
+
+    Query params:
+    - location_id: ID do GHL
+    - client_name: Nome do cliente (opcional)
+
+    Returns:
+    - Dados do tenant
+    - Action: found ou created
+    """
+    if not PORTAL_SERVICE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Portal service not available")
+
+    try:
+        result = portal_service.ensure_tenant_exists(
+            location_id=location_id,
+            client_name=client_name
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"Error ensuring tenant: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
 # MAIN
 # ============================================
 
