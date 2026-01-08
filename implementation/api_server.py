@@ -381,10 +381,59 @@ class SupabaseClient:
             logger.error(f"Error fetching tenant: {e}")
             return None
 
-    def resolve_tenant_id(self, tenant_id: str) -> Optional[str]:
-        """Resolve tenant_id (slug or UUID) to UUID"""
+    def resolve_tenant_id(self, tenant_id: str, auto_create: bool = True) -> Optional[str]:
+        """
+        Resolve tenant_id (slug or UUID) to UUID.
+        Se auto_create=True e o tenant não existir, cria automaticamente.
+        """
         tenant = self.get_tenant(tenant_id)
-        return tenant.get("id") if tenant else None
+        if tenant:
+            return tenant.get("id")
+
+        # Tenant não existe - criar automaticamente se permitido
+        if auto_create and tenant_id:
+            created_tenant = self.create_tenant_from_ghl_location(tenant_id)
+            if created_tenant:
+                return created_tenant.get("id")
+
+        return None
+
+    def create_tenant_from_ghl_location(self, location_id: str) -> Optional[Dict]:
+        """
+        Cria um tenant automaticamente baseado no location_id do GHL.
+        Isso permite que novos clientes sejam registrados automaticamente.
+        """
+        try:
+            # Criar tenant com dados básicos
+            tenant_data = {
+                "name": f"GHL Location {location_id[:8]}",
+                "slug": location_id,  # Usar location_id como slug
+                "tier": "free",
+                "status": "active",
+                "settings": {
+                    "ghl_location_id": location_id,
+                    "auto_created": True,
+                    "created_from": "classify_lead_api"
+                }
+            }
+
+            response = requests.post(
+                f"{self.base_url}/tenants",
+                headers=self.headers,
+                json=tenant_data
+            )
+
+            if response.status_code in [200, 201]:
+                created = response.json()
+                logger.info(f"✅ Auto-created tenant for GHL location: {location_id}")
+                return created[0] if isinstance(created, list) else created
+            else:
+                logger.error(f"❌ Failed to auto-create tenant: {response.status_code} - {response.text}")
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ Exception creating tenant: {e}")
+            return None
 
     def get_active_persona(self, tenant_id: str) -> Optional[Dict]:
         """Get active persona for tenant"""
@@ -463,8 +512,21 @@ class SupabaseClient:
             return False
 
     def save_classified_lead(self, data: Dict) -> bool:
-        """Save classified lead"""
+        """
+        Save classified lead.
+        Resolve tenant_id automaticamente (cria tenant se não existir).
+        """
         try:
+            # Resolver tenant_id para UUID válido
+            raw_tenant_id = data.get("tenant_id")
+            if raw_tenant_id:
+                resolved_id = self.resolve_tenant_id(raw_tenant_id, auto_create=True)
+                if resolved_id:
+                    data["tenant_id"] = resolved_id
+                else:
+                    logger.warning(f"Could not resolve tenant_id: {raw_tenant_id}, skipping save")
+                    return False
+
             response = requests.post(
                 f"{self.base_url}/classified_leads",
                 headers=self.headers,
