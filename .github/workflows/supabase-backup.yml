@@ -15,13 +15,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Supabase CLI
-        run: npm install -g supabase
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
 
       - name: Create backup directory
         run: mkdir -p backups
@@ -32,25 +29,28 @@ jobs:
 
       - name: Backup Schema (estrutura)
         run: |
-          supabase db dump \
-            --db-url "${{ secrets.SUPABASE_DB_URL }}" \
+          pg_dump "${{ secrets.SUPABASE_DB_URL }}" \
+            --schema-only \
+            --no-owner \
+            --no-privileges \
             -f backups/schema_${{ steps.timestamp.outputs.date }}.sql
         continue-on-error: false
 
       - name: Backup Data (dados)
         run: |
-          supabase db dump \
-            --db-url "${{ secrets.SUPABASE_DB_URL }}" \
+          pg_dump "${{ secrets.SUPABASE_DB_URL }}" \
             --data-only \
+            --no-owner \
+            --no-privileges \
             -f backups/data_${{ steps.timestamp.outputs.date }}.sql
         continue-on-error: false
 
-      - name: Backup Roles (permissões)
+      - name: Backup Full (schema + data)
         run: |
-          supabase db dump \
-            --db-url "${{ secrets.SUPABASE_DB_URL }}" \
-            --role-only \
-            -f backups/roles_${{ steps.timestamp.outputs.date }}.sql
+          pg_dump "${{ secrets.SUPABASE_DB_URL }}" \
+            --no-owner \
+            --no-privileges \
+            -f backups/full_${{ steps.timestamp.outputs.date }}.sql
         continue-on-error: true
 
       - name: Compress backups
@@ -84,4 +84,6 @@ jobs:
           echo "**Contains:**" >> $GITHUB_STEP_SUMMARY
           echo "- Schema (estrutura das tabelas)" >> $GITHUB_STEP_SUMMARY
           echo "- Data (todos os dados)" >> $GITHUB_STEP_SUMMARY
-          echo "- Roles (permissões RLS)" >> $GITHUB_STEP_SUMMARY
+          echo "- Full (backup completo)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          ls -lh backups/*.tar.gz | tail -5 >> $GITHUB_STEP_SUMMARY
