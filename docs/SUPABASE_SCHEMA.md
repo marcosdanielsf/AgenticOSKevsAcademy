@@ -453,7 +453,7 @@ ORDER BY created_at ASC;
 
 ---
 
-### 3.3 `portal_messages`
+### 3.5 `portal_messages`
 
 > **Status:** VAZIA
 > **Propósito:** Mensagens das conversas do Portal
