@@ -28,6 +28,7 @@ Uso:
 
 import os
 import json
+import time
 import requests
 import logging
 from datetime import datetime
@@ -38,6 +39,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Import SessionPool (lazy para evitar circular import)
+_session_pool = None
+
+def _get_session_pool():
+    """Lazy import do SessionPool"""
+    global _session_pool
+    if _session_pool is None:
+        try:
+            from instagram_session_pool import get_session_pool
+            _session_pool = get_session_pool()
+        except ImportError:
+            logger.warning("SessionPool não disponível, usando session única")
+    return _session_pool
 
 
 class InstagramAPIScraper:
@@ -51,33 +66,55 @@ class InstagramAPIScraper:
     GRAPH_URL = "https://www.instagram.com/api/v1"
     WEB_URL = "https://www.instagram.com"
 
-    def __init__(self, session_id: str = None):
+    def __init__(self, session_id: str = None, use_pool: bool = True):
         """
         Inicializa o scraper.
 
         Args:
-            session_id: O sessionid do cookie do Instagram (obrigatório)
+            session_id: O sessionid do cookie do Instagram (opcional se usar pool)
+            use_pool: Se True, usa o SessionPool para rotacionar sessions (default: True)
         """
-        self.session_id = session_id or os.getenv("INSTAGRAM_SESSION_ID")
+        self.use_pool = use_pool
+        self._pool_session = None  # Session object do pool
+        self._pool_session_uuid = None  # UUID para reportar resultados
 
-        if not self.session_id:
-            # Tentar carregar do arquivo de sessão
-            session_path = Path(__file__).parent.parent / "sessions" / "instagram_session.json"
-            if session_path.exists():
-                try:
-                    session_data = json.loads(session_path.read_text())
-                    cookies = session_data.get("cookies", [])
-                    for cookie in cookies:
-                        if cookie.get("name") == "sessionid":
-                            self.session_id = cookie.get("value")
-                            break
-                except Exception as e:
-                    logger.warning(f"Erro ao carregar sessão: {e}")
+        # Se session_id fornecido explicitamente, usar ele
+        if session_id:
+            self.session_id = session_id
+            self.use_pool = False
+        else:
+            # Tentar usar o pool
+            if use_pool:
+                pool = _get_session_pool()
+                if pool:
+                    self._pool_session = pool.get_session()
+                    if self._pool_session:
+                        self.session_id = self._pool_session.session_id
+                        self._pool_session_uuid = self._pool_session.id
+                        logger.info(f"Usando session do pool: @{self._pool_session.username}")
+
+            # Fallback para env var
+            if not hasattr(self, 'session_id') or not self.session_id:
+                self.session_id = os.getenv("INSTAGRAM_SESSION_ID")
+
+            # Fallback para arquivo de sessão
+            if not self.session_id:
+                session_path = Path(__file__).parent.parent / "sessions" / "instagram_session.json"
+                if session_path.exists():
+                    try:
+                        session_data = json.loads(session_path.read_text())
+                        cookies = session_data.get("cookies", [])
+                        for cookie in cookies:
+                            if cookie.get("name") == "sessionid":
+                                self.session_id = cookie.get("value")
+                                break
+                    except Exception as e:
+                        logger.warning(f"Erro ao carregar sessão: {e}")
 
         if not self.session_id:
             raise ValueError(
-                "Session ID não encontrado. Configure INSTAGRAM_SESSION_ID no .env "
-                "ou passe como parâmetro."
+                "Session ID não encontrado. Configure INSTAGRAM_SESSION_ID no .env, "
+                "adicione sessions ao pool, ou passe como parâmetro."
             )
 
         # Headers que imitam o app do Instagram
@@ -109,6 +146,69 @@ class InstagramAPIScraper:
 
         self.session = requests.Session()
         logger.info("InstagramAPIScraper inicializado")
+
+    def _report_to_pool(
+        self,
+        operation: str,
+        target_username: str = None,
+        success: bool = True,
+        response_status: int = None,
+        error_message: str = None,
+        duration_ms: int = None
+    ):
+        """Reporta resultado da operação ao pool de sessions"""
+        if not self.use_pool or not self._pool_session_uuid:
+            return
+
+        pool = _get_session_pool()
+        if pool:
+            pool.report_result(
+                session_id=self._pool_session_uuid,
+                operation=operation,
+                target_username=target_username,
+                success=success,
+                response_status=response_status,
+                error_message=error_message,
+                duration_ms=duration_ms
+            )
+
+    def rotate_session(self):
+        """
+        Força rotação para próxima session do pool.
+
+        Útil quando detecta rate limit ou erro na session atual.
+        """
+        if not self.use_pool:
+            logger.warning("Rotação não disponível - não está usando pool")
+            return False
+
+        pool = _get_session_pool()
+        if not pool:
+            return False
+
+        # Reportar problema na session atual
+        if self._pool_session_uuid:
+            self._report_to_pool(
+                operation="rotation_requested",
+                success=False,
+                error_message="Manual rotation requested"
+            )
+
+        # Pegar nova session
+        self._pool_session = pool.get_session()
+        if self._pool_session:
+            self.session_id = self._pool_session.session_id
+            self._pool_session_uuid = self._pool_session.id
+
+            # Atualizar headers com nova session
+            self.headers["Cookie"] = f"sessionid={self.session_id}"
+            self.web_headers["Cookie"] = f"sessionid={self.session_id}"
+
+            logger.info(f"Rotacionado para session: @{self._pool_session.username}")
+            return True
+
+        logger.error("Não há sessions disponíveis no pool")
+        return False
 
     def get_user_by_id(self, user_id: str) -> Optional[Dict]:
         """
@@ -206,6 +306,8 @@ class InstagramAPIScraper:
             "error": None
         }
 
+        start_time = time.time()
+
         try:
             # Método 1: API Mobile (i.instagram.com) - mais confiável
             url = f"{self.BASE_URL}/users/web_profile_info/?username={username}"
@@ -227,6 +329,15 @@ class InstagramAPIScraper:
                         if extra_data:
                             result.update(extra_data)
 
+                    # Reportar sucesso ao pool
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    self._report_to_pool(
+                        operation="get_profile",
+                        target_username=username,
+                        success=True,
+                        response_status=200,
+                        duration_ms=duration_ms
+                    )
                     return result
 
             # Método 2: Web Profile Info (fallback)
@@ -260,11 +371,27 @@ class InstagramAPIScraper:
                 return result
 
             result["error"] = "Não foi possível obter dados do perfil"
+            duration_ms = int((time.time() - start_time) * 1000)
+            self._report_to_pool(
+                operation="get_profile",
+                target_username=username,
+                success=False,
+                error_message=result["error"],
+                duration_ms=duration_ms
+            )
             return result
 
         except Exception as e:
             logger.error(f"Erro ao obter perfil de {username}: {e}")
             result["error"] = str(e)
+            duration_ms = int((time.time() - start_time) * 1000)
+            self._report_to_pool(
+                operation="get_profile",
+                target_username=username,
+                success=False,
+                error_message=str(e),
+                duration_ms=duration_ms
+            )
             return result
 
     def _parse_web_profile(self, user: Dict) -> Dict:

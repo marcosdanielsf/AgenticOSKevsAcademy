@@ -4255,6 +4255,243 @@ async def portal_ensure_tenant(
 
 
 # ============================================
+# SESSION POOL MANAGEMENT ENDPOINTS
+# ============================================
+
+# Try to import SessionPool
+try:
+    from instagram_session_pool import get_session_pool, SessionPool
+    SESSION_POOL_AVAILABLE = True
+except ImportError:
+    SESSION_POOL_AVAILABLE = False
+    logger.warning("SessionPool not available")
+
+
+class AddSessionRequest(BaseModel):
+    """Request para adicionar session ao pool"""
+    username: str = Field(..., description="Username da conta Instagram")
+    session_id: str = Field(..., description="Session ID (cookie sessionid)")
+    daily_limit: int = Field(default=200, description="Limite diário de requests")
+    notes: Optional[str] = Field(default=None, description="Notas sobre a conta")
+
+
+class UpdateSessionRequest(BaseModel):
+    """Request para atualizar session"""
+    new_session_id: Optional[str] = Field(default=None, description="Novo session ID")
+    status: Optional[str] = Field(default=None, description="Status: active, rate_limited, blocked, expired")
+    daily_limit: Optional[int] = Field(default=None, description="Novo limite diário")
+    notes: Optional[str] = Field(default=None, description="Novas notas")
+
+
+@app.get("/api/sessions/pool")
+async def get_session_pool_stats():
+    """
+    Retorna estatísticas do pool de sessions.
+
+    Returns:
+        - pool_available: Se o pool está configurado
+        - total_sessions: Total de sessions no pool
+        - active_sessions: Sessions ativas
+        - rate_limited_sessions: Sessions em rate limit
+        - blocked_sessions: Sessions bloqueadas
+        - requests_today: Total de requests hoje
+        - daily_capacity: Capacidade diária total
+        - usage_percent: Porcentagem de uso
+        - estimated_remaining: Requests restantes
+    """
+    if not SESSION_POOL_AVAILABLE:
+        return {
+            "pool_available": False,
+            "message": "SessionPool module not available"
+        }
+
+    try:
+        pool = get_session_pool()
+        stats = pool.get_pool_stats()
+        return stats
+
+    except Exception as e:
+        logger.error(f"Error getting pool stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/sessions")
+async def list_sessions():
+    """
+    Lista todas as sessions do pool com estatísticas.
+
+    Returns:
+        Lista de sessions com:
+        - id, username, status, health_score
+        - requests_today, daily_limit, usage_percent
+        - last_request_at, rate_limited_until
+        - last_error
+    """
+    if not SESSION_POOL_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="SessionPool not available. Configure Supabase and run migration."
+        )
+
+    try:
+        pool = get_session_pool()
+        sessions = pool.get_all_sessions()
+        return {
+            "success": True,
+            "sessions": sessions,
+            "count": len(sessions)
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing sessions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/sessions")
+async def add_session(request: AddSessionRequest):
+    """
+    Adiciona nova session ao pool.
+
+    Body:
+        - username: Username da conta Instagram
+        - session_id: Session ID (cookie sessionid)
+        - daily_limit: Limite diário de requests (default: 200)
+        - notes: Notas sobre a conta (opcional)
+
+    Returns:
+        ID da session criada
+    """
+    if not SESSION_POOL_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="SessionPool not available"
+        )
+
+    try:
+        pool = get_session_pool()
+        session_uuid = pool.add_session(
+            username=request.username,
+            session_id=request.session_id,
+            daily_limit=request.daily_limit,
+            notes=request.notes
+        )
+
+        if session_uuid:
+            return {
+                "success": True,
+                "session_id": session_uuid,
+                "message": f"Session @{request.username} added to pool"
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to add session. Check if username already exists."
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/sessions/{session_uuid}")
+async def update_session(session_uuid: str, request: UpdateSessionRequest):
+    """
+    Atualiza dados de uma session.
+
+    Path:
+        - session_uuid: ID (UUID) da session
+
+    Body:
+        - new_session_id: Novo session ID (cookie)
+        - status: Novo status (active, rate_limited, blocked, expired)
+        - daily_limit: Novo limite diário
+        - notes: Novas notas
+    """
+    if not SESSION_POOL_AVAILABLE:
+        raise HTTPException(status_code=503, detail="SessionPool not available")
+
+    try:
+        pool = get_session_pool()
+        success = pool.update_session(
+            session_id=session_uuid,
+            new_session_id=request.new_session_id,
+            status=request.status,
+            daily_limit=request.daily_limit,
+            notes=request.notes
+        )
+
+        if success:
+            return {"success": True, "message": "Session updated"}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to update session")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/sessions/{session_uuid}")
+async def remove_session(session_uuid: str):
+    """
+    Remove session do pool.
+
+    Path:
+        - session_uuid: ID (UUID) da session a remover
+    """
+    if not SESSION_POOL_AVAILABLE:
+        raise HTTPException(status_code=503, detail="SessionPool not available")
+
+    try:
+        pool = get_session_pool()
+        success = pool.remove_session(session_uuid)
+
+        if success:
+            return {"success": True, "message": "Session removed"}
+        else:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/sessions/health-check")
+async def run_health_check(background_tasks: BackgroundTasks):
+    """
+    Executa health check em todas as sessions ativas.
+
+    O health check roda em background pois pode demorar.
+
+    Returns:
+        - Inicia o health check em background
+        - Use GET /api/sessions para ver resultados
+    """
+    if not SESSION_POOL_AVAILABLE:
+        raise HTTPException(status_code=503, detail="SessionPool not available")
+
+    try:
+        pool = get_session_pool()
+
+        # Rodar em background
+        background_tasks.add_task(pool.health_check_all)
+
+        return {
+            "success": True,
+            "message": "Health check started in background. Check /api/sessions for results."
+        }
+
+    except Exception as e:
+        logger.error(f"Error starting health check: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
 # MAIN
 # ============================================
 
