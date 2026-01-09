@@ -1,0 +1,87 @@
+name: Supabase Daily Backup
+
+on:
+  schedule:
+    # Roda todo dia às 3h da manhã (horário de Brasília = 6h UTC)
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    # Permite rodar manualmente pelo GitHub
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Supabase CLI
+        run: npm install -g supabase
+
+      - name: Create backup directory
+        run: mkdir -p backups
+
+      - name: Generate timestamp
+        id: timestamp
+        run: echo "date=$(date +'%Y-%m-%d_%H-%M-%S')" >> $GITHUB_OUTPUT
+
+      - name: Backup Schema (estrutura)
+        run: |
+          supabase db dump \
+            --db-url "${{ secrets.SUPABASE_DB_URL }}" \
+            -f backups/schema_${{ steps.timestamp.outputs.date }}.sql
+        continue-on-error: false
+
+      - name: Backup Data (dados)
+        run: |
+          supabase db dump \
+            --db-url "${{ secrets.SUPABASE_DB_URL }}" \
+            --data-only \
+            -f backups/data_${{ steps.timestamp.outputs.date }}.sql
+        continue-on-error: false
+
+      - name: Backup Roles (permissões)
+        run: |
+          supabase db dump \
+            --db-url "${{ secrets.SUPABASE_DB_URL }}" \
+            --role-only \
+            -f backups/roles_${{ steps.timestamp.outputs.date }}.sql
+        continue-on-error: true
+
+      - name: Compress backups
+        run: |
+          cd backups
+          tar -czvf backup_${{ steps.timestamp.outputs.date }}.tar.gz *.sql
+          rm -f *.sql
+
+      - name: Keep only last 30 backups
+        run: |
+          cd backups
+          ls -t *.tar.gz 2>/dev/null | tail -n +31 | xargs -r rm -f
+
+      - name: Commit and push backup
+        run: |
+          git config user.name "Backup Bot"
+          git config user.email "backup@mottivme.com"
+          git add backups/
+          git commit -m "backup: Supabase ${{ steps.timestamp.outputs.date }}" || echo "No changes to commit"
+          git push
+
+      - name: Backup Summary
+        run: |
+          echo "## Backup Completed Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** ${{ steps.timestamp.outputs.date }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Files created:**" >> $GITHUB_STEP_SUMMARY
+          echo "- \`backup_${{ steps.timestamp.outputs.date }}.tar.gz\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Contains:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Schema (estrutura das tabelas)" >> $GITHUB_STEP_SUMMARY
+          echo "- Data (todos os dados)" >> $GITHUB_STEP_SUMMARY
+          echo "- Roles (permissões RLS)" >> $GITHUB_STEP_SUMMARY

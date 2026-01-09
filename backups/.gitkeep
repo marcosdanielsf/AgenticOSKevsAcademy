@@ -1,0 +1,3 @@
+# Este diretório armazena backups automáticos do Supabase
+# Backups são comprimidos em .tar.gz
+# Mantém últimos 30 dias
