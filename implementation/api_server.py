@@ -1108,6 +1108,274 @@ async def scrape_commenters(request: ScrapeCommentersRequest, background_tasks: 
 
 
 # ============================================
+# SCRAPE FOLLOWERS ENDPOINT
+# ============================================
+
+class ScrapeFollowersRequest(BaseModel):
+    """Request para scrape de seguidores."""
+    username: str = Field(..., description="Username do perfil alvo")
+    max_followers: int = Field(100, description="Máximo de seguidores a retornar")
+    save_to_db: bool = Field(True, description="Salvar leads no banco")
+    tenant_id: Optional[str] = Field(None, description="ID do tenant")
+
+
+@app.post("/webhook/scrape-followers")
+async def scrape_followers(request: ScrapeFollowersRequest):
+    """
+    Scrape seguidores de um perfil do Instagram.
+    Retorna lista de seguidores com dados básicos.
+    """
+    logger.info(f"Scraping followers de @{request.username} (max: {request.max_followers})")
+
+    try:
+        from instagram_api_scraper import InstagramAPIScraper
+        from supabase_integration import SupabaseClient
+
+        scraper = InstagramAPIScraper()
+        result = scraper.get_followers(request.username, max_count=request.max_followers)
+
+        if not result.get("success"):
+            return {
+                "success": False,
+                "username": request.username,
+                "error": result.get("error", "Falha ao buscar seguidores"),
+                "followers": []
+            }
+
+        followers = result.get("followers", [])
+
+        # Salvar no banco se solicitado
+        saved_count = 0
+        if request.save_to_db and followers:
+            db = SupabaseClient()
+            for follower in followers:
+                try:
+                    db._request('POST', 'growth_leads', data={
+                        'instagram_username': follower.get('username'),
+                        'name': follower.get('full_name') or follower.get('username'),
+                        'source_channel': f'instagram_followers_{request.username}',
+                        'funnel_stage': 'lead',
+                        'lead_temperature': 'cold',
+                        'location_id': request.tenant_id or '11111111-1111-1111-1111-111111111111',
+                        'avatar_url': follower.get('profile_pic_url'),
+                        'custom_fields': {
+                            'scraped_from': request.username,
+                            'is_private': follower.get('is_private'),
+                            'is_verified': follower.get('is_verified'),
+                        }
+                    })
+                    saved_count += 1
+                except Exception as e:
+                    logger.warning(f"Erro ao salvar follower {follower.get('username')}: {e}")
+
+        return {
+            "success": True,
+            "username": request.username,
+            "followers": followers,
+            "count": len(followers),
+            "total_followers": result.get("total_followers", 0),
+            "saved_to_db": saved_count
+        }
+
+    except Exception as e:
+        logger.error(f"Erro ao buscar seguidores: {e}", exc_info=True)
+        return {
+            "success": False,
+            "username": request.username,
+            "error": str(e),
+            "followers": []
+        }
+
+
+# ============================================
+# SCRAPE HASHTAG ENDPOINT
+# ============================================
+
+class ScrapeHashtagRequest(BaseModel):
+    """Request para scrape de hashtag."""
+    hashtag: str = Field(..., description="Hashtag a buscar (com ou sem #)")
+    max_users: int = Field(50, description="Máximo de usuários a retornar")
+    save_to_db: bool = Field(True, description="Salvar leads no banco")
+    tenant_id: Optional[str] = Field(None, description="ID do tenant")
+
+
+@app.post("/webhook/scrape-hashtag")
+async def scrape_hashtag(request: ScrapeHashtagRequest):
+    """
+    Busca posts de uma hashtag e extrai os autores como leads.
+    """
+    hashtag = request.hashtag.lstrip("#").strip()
+    logger.info(f"Scraping hashtag #{hashtag} (max: {request.max_users})")
+
+    try:
+        from instagram_api_scraper import InstagramAPIScraper
+        from supabase_integration import SupabaseClient
+
+        scraper = InstagramAPIScraper()
+        result = scraper.search_hashtag(hashtag, max_posts=request.max_users)
+
+        if not result.get("success"):
+            return {
+                "success": False,
+                "hashtag": hashtag,
+                "error": result.get("error", "Falha ao buscar hashtag"),
+                "users": []
+            }
+
+        users = result.get("users", [])
+
+        # Salvar no banco se solicitado
+        saved_count = 0
+        if request.save_to_db and users:
+            db = SupabaseClient()
+            for user in users:
+                try:
+                    db._request('POST', 'growth_leads', data={
+                        'instagram_username': user.get('username'),
+                        'name': user.get('full_name') or user.get('username'),
+                        'source_channel': f'instagram_hashtag_{hashtag}',
+                        'funnel_stage': 'lead',
+                        'lead_temperature': 'cold',
+                        'location_id': request.tenant_id or '11111111-1111-1111-1111-111111111111',
+                        'avatar_url': user.get('profile_pic_url'),
+                        'custom_fields': {
+                            'scraped_from_hashtag': hashtag,
+                            'is_private': user.get('is_private'),
+                            'is_verified': user.get('is_verified'),
+                        }
+                    })
+                    saved_count += 1
+                except Exception as e:
+                    logger.warning(f"Erro ao salvar user {user.get('username')}: {e}")
+
+        return {
+            "success": True,
+            "hashtag": hashtag,
+            "users": users,
+            "count": len(users),
+            "saved_to_db": saved_count
+        }
+
+    except Exception as e:
+        logger.error(f"Erro ao buscar hashtag: {e}", exc_info=True)
+        return {
+            "success": False,
+            "hashtag": hashtag,
+            "error": str(e),
+            "users": []
+        }
+
+
+# ============================================
+# BATCH SCRAPE ENDPOINT
+# ============================================
+
+class BatchScrapeRequest(BaseModel):
+    """Request para scrape em lote de usernames."""
+    usernames: List[str] = Field(..., description="Lista de usernames a processar")
+    save_to_db: bool = Field(True, description="Salvar leads no banco")
+    tenant_id: Optional[str] = Field(None, description="ID do tenant")
+
+
+@app.post("/webhook/scrape-batch")
+async def scrape_batch(request: BatchScrapeRequest):
+    """
+    Scrape múltiplos perfis de uma vez.
+    Processa lista de usernames e retorna dados de cada um.
+    """
+    logger.info(f"Batch scraping {len(request.usernames)} perfis")
+
+    try:
+        from instagram_api_scraper import InstagramAPIScraper
+        from supabase_integration import SupabaseClient
+
+        scraper = InstagramAPIScraper()
+        db = SupabaseClient() if request.save_to_db else None
+
+        results = []
+        success_count = 0
+        saved_count = 0
+
+        for username in request.usernames:
+            username = username.strip().lstrip("@").lower()
+            if not username:
+                continue
+
+            try:
+                profile = scraper.get_profile(username)
+
+                if profile.get("success"):
+                    score_data = scraper.calculate_lead_score(profile)
+                    profile.update(score_data)
+                    success_count += 1
+
+                    # Salvar no banco
+                    if db:
+                        try:
+                            db._request('POST', 'growth_leads', data={
+                                'instagram_username': username,
+                                'name': profile.get('full_name') or username,
+                                'source_channel': 'instagram_batch_scrape',
+                                'funnel_stage': 'lead',
+                                'lead_temperature': 'hot' if profile.get('score', 0) >= 60 else 'warm' if profile.get('score', 0) >= 40 else 'cold',
+                                'lead_score': profile.get('score', 0),
+                                'location_id': request.tenant_id or '11111111-1111-1111-1111-111111111111',
+                                'avatar_url': profile.get('profile_pic_url'),
+                                'custom_fields': {
+                                    'instagram_bio': profile.get('bio'),
+                                    'instagram_followers': profile.get('followers_count'),
+                                    'instagram_following': profile.get('following_count'),
+                                    'instagram_posts': profile.get('posts_count'),
+                                    'instagram_is_business': profile.get('is_business'),
+                                    'instagram_is_verified': profile.get('is_verified'),
+                                    'classification': profile.get('classification'),
+                                    'signals': profile.get('signals', []),
+                                }
+                            })
+                            saved_count += 1
+                        except Exception as e:
+                            logger.warning(f"Erro ao salvar {username}: {e}")
+
+                results.append({
+                    "username": username,
+                    "success": profile.get("success", False),
+                    "full_name": profile.get("full_name"),
+                    "followers": profile.get("followers_count", 0),
+                    "score": profile.get("score", 0),
+                    "classification": profile.get("classification", "LEAD_COLD"),
+                    "error": profile.get("error") if not profile.get("success") else None
+                })
+
+                # Rate limiting entre requests
+                import time
+                time.sleep(1.5)
+
+            except Exception as e:
+                results.append({
+                    "username": username,
+                    "success": False,
+                    "error": str(e)
+                })
+
+        return {
+            "success": True,
+            "total": len(request.usernames),
+            "processed": len(results),
+            "success_count": success_count,
+            "saved_to_db": saved_count,
+            "results": results
+        }
+
+    except Exception as e:
+        logger.error(f"Erro no batch scrape: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "results": []
+        }
+
+
+# ============================================
 # DM ENDPOINTS
 # ============================================
 

@@ -629,6 +629,154 @@ class InstagramAPIScraper:
             "signals": signals
         }
 
+    def get_followers(self, username: str, max_count: int = 100) -> Dict:
+        """
+        Obtém lista de seguidores de um perfil.
+
+        Args:
+            username: Username do perfil alvo
+            max_count: Máximo de seguidores a retornar (default: 100)
+
+        Returns:
+            Dict com success, followers (list), count, etc.
+        """
+        try:
+            logger.info(f"Buscando seguidores de @{username} (max: {max_count})")
+
+            # Primeiro, obter o user_id do perfil
+            profile = self.get_profile(username)
+            if not profile.get("success"):
+                return {"success": False, "error": "Perfil não encontrado", "followers": []}
+
+            user_id = profile.get("user_id")
+            if not user_id:
+                return {"success": False, "error": "User ID não encontrado", "followers": []}
+
+            # Endpoint para listar seguidores
+            followers = []
+            max_id = None
+
+            while len(followers) < max_count:
+                url = f"{self.BASE_URL}/friendships/{user_id}/followers/"
+                params = {"count": min(50, max_count - len(followers))}
+                if max_id:
+                    params["max_id"] = max_id
+
+                response = self.session.get(url, headers=self.headers, params=params, timeout=30)
+
+                if response.status_code != 200:
+                    logger.warning(f"Erro ao buscar seguidores: {response.status_code}")
+                    break
+
+                data = response.json()
+                users = data.get("users", [])
+
+                if not users:
+                    break
+
+                for user in users:
+                    followers.append({
+                        "user_id": user.get("pk"),
+                        "username": user.get("username"),
+                        "full_name": user.get("full_name"),
+                        "is_private": user.get("is_private", False),
+                        "is_verified": user.get("is_verified", False),
+                        "profile_pic_url": user.get("profile_pic_url"),
+                    })
+
+                max_id = data.get("next_max_id")
+                if not max_id or not data.get("big_list"):
+                    break
+
+                # Rate limiting
+                import time
+                time.sleep(1)
+
+            logger.info(f"Encontrados {len(followers)} seguidores de @{username}")
+
+            return {
+                "success": True,
+                "username": username,
+                "followers": followers,
+                "count": len(followers),
+                "total_followers": profile.get("followers_count", 0)
+            }
+
+        except Exception as e:
+            logger.error(f"Erro ao buscar seguidores: {e}")
+            return {"success": False, "error": str(e), "followers": []}
+
+    def search_hashtag(self, hashtag: str, max_posts: int = 50) -> Dict:
+        """
+        Busca posts recentes de uma hashtag e extrai os autores.
+
+        Args:
+            hashtag: Hashtag a buscar (sem #)
+            max_posts: Máximo de posts a processar (default: 50)
+
+        Returns:
+            Dict com success, users (list), posts_analyzed, etc.
+        """
+        try:
+            # Limpar hashtag
+            hashtag = hashtag.lstrip("#").strip().lower()
+            logger.info(f"Buscando posts da hashtag #{hashtag} (max: {max_posts})")
+
+            # Endpoint para buscar hashtag
+            url = f"{self.WEB_URL}/explore/tags/{hashtag}/"
+            params = {"__a": 1, "__d": "dis"}
+
+            response = self.session.get(url, headers=self.web_headers, params=params, timeout=30)
+
+            if response.status_code != 200:
+                # Tentar endpoint alternativo
+                url = f"{self.GRAPH_URL}/tags/{hashtag}/sections/"
+                response = self.session.get(url, headers=self.headers, timeout=30)
+
+            if response.status_code != 200:
+                return {"success": False, "error": f"Hashtag não encontrada: {response.status_code}", "users": []}
+
+            data = response.json()
+            users = []
+            seen_usernames = set()
+
+            # Extrair usuários dos posts
+            # Estrutura pode variar dependendo do endpoint
+            sections = data.get("sections", [])
+            for section in sections:
+                medias = section.get("layout_content", {}).get("medias", [])
+                for media in medias:
+                    media_data = media.get("media", {})
+                    user = media_data.get("user", {})
+                    username = user.get("username")
+
+                    if username and username not in seen_usernames:
+                        seen_usernames.add(username)
+                        users.append({
+                            "user_id": user.get("pk"),
+                            "username": username,
+                            "full_name": user.get("full_name"),
+                            "is_private": user.get("is_private", False),
+                            "is_verified": user.get("is_verified", False),
+                            "profile_pic_url": user.get("profile_pic_url"),
+                        })
+
+                    if len(users) >= max_posts:
+                        break
+
+            logger.info(f"Encontrados {len(users)} usuários na hashtag #{hashtag}")
+
+            return {
+                "success": True,
+                "hashtag": hashtag,
+                "users": users,
+                "count": len(users),
+            }
+
+        except Exception as e:
+            logger.error(f"Erro ao buscar hashtag: {e}")
+            return {"success": False, "error": str(e), "users": []}
+
 
 # ============================================
 # FUNÇÕES DE CONVENIÊNCIA
