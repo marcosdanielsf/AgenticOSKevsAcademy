@@ -31,7 +31,7 @@ jobs:
 
       - name: Backup Schema (estrutura)
         run: |
-          pg_dump "${{ secrets.SUPABASE_DB_URL }}" \
+          /usr/lib/postgresql/17/bin/pg_dump "${{ secrets.SUPABASE_DB_URL }}" \
             --schema-only \
             --no-owner \
             --no-privileges \
@@ -40,7 +40,7 @@ jobs:
 
       - name: Backup Data (dados)
         run: |
-          pg_dump "${{ secrets.SUPABASE_DB_URL }}" \
+          /usr/lib/postgresql/17/bin/pg_dump "${{ secrets.SUPABASE_DB_URL }}" \
             --data-only \
             --no-owner \
             --no-privileges \
@@ -49,7 +49,7 @@ jobs:
 
       - name: Backup Full (schema + data)
         run: |
-          pg_dump "${{ secrets.SUPABASE_DB_URL }}" \
+          /usr/lib/postgresql/17/bin/pg_dump "${{ secrets.SUPABASE_DB_URL }}" \
             --no-owner \
             --no-privileges \
             -f backups/full_${{ steps.timestamp.outputs.date }}.sql
