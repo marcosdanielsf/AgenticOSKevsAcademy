@@ -1,10 +1,28 @@
 # Supabase Schema - MOTTIVME Sales
 
 > **Projeto:** `bfumywvwubvernvhjehk`
-> **Última atualização:** 2026-01-08
+> **Última atualização:** 2026-01-09
 > **Total de tabelas/views:** 390+
+> **Tabelas documentadas:** 20
 
 Este documento serve como referência para o schema do banco de dados Supabase usado nos projetos MOTTIVME Sales.
+
+---
+
+## 🔥 Tabelas Mais Ativas (por volume de registros)
+
+| # | Tabela | Registros | Categoria |
+|---|--------|-----------|-----------|
+| 1 | `llm_costs` | 7.802 | Métricas/Custos IA |
+| 2 | `agent_conversation_messages` | 5.094 | Conversas |
+| 3 | `messages` | 3.660 | Mensagens gerais |
+| 4 | `n8n_active_conversation` | 618 | Integração n8n |
+| 5 | `agent_conversations` | 591 | Conversas |
+| 6 | `fin_movimentacoes` | 303 | Financeiro |
+| 7 | `n8n_historico_mensagens` | 194 | Integração n8n |
+| 8 | `claude_conversations` | 177 | IA/Claude Code |
+| 9 | `fin_categorias` | 123 | Financeiro |
+| 10 | `crm_leads` | 93 | Leads |
 
 ---
 
@@ -18,8 +36,10 @@ Este documento serve como referência para o schema do banco de dados Supabase u
 6. [Tabelas de Métricas e Analytics](#6-tabelas-de-métricas-e-analytics)
 7. [Tabelas Financeiras](#7-tabelas-financeiras)
 8. [Tabelas de IA/RAG](#8-tabelas-de-iarag)
-9. [Relacionamentos Entre Tabelas](#9-relacionamentos-entre-tabelas)
-10. [Enums e Valores Válidos](#10-enums-e-valores-válidos)
+9. [Tabelas de Integração n8n](#9-tabelas-de-integração-n8n)
+10. [Tabelas Claude Code](#10-tabelas-claude-code)
+11. [Relacionamentos Entre Tabelas](#11-relacionamentos-entre-tabelas)
+12. [Enums e Valores Válidos](#12-enums-e-valores-válidos)
 
 ---
 
@@ -328,7 +348,83 @@ Este documento serve como referência para o schema do banco de dados Supabase u
 
 ---
 
-### 3.2 `portal_conversations`
+### 3.2 `agent_conversation_messages` ⭐ (5.094 registros)
+
+> **Status:** POPULADA - 2ª tabela mais ativa
+> **Propósito:** Mensagens individuais das conversas com agentes IA
+
+| Coluna | Tipo | Exemplo | Descrição |
+|--------|------|---------|-----------|
+| `id` | uuid | `3f64af23-...` | PK |
+| `conversation_id` | uuid | `8a1b2c3d-...` | FK para agent_conversations |
+| `message_text` | text | `Olá, gostaria de agendar...` | Conteúdo da mensagem |
+| `is_from_lead` | boolean | true/false | true = lead, false = agente IA |
+| `created_at` | timestamptz | `2026-01-09T14:30:00Z` | Data/hora da mensagem |
+
+**Exemplo de dados:**
+```json
+{
+  "id": "3f64af23-1234-5678-abcd-ef0123456789",
+  "conversation_id": "8a1b2c3d-4567-890a-bcde-f12345678901",
+  "message_text": "Bom dia! Gostaria de saber mais sobre a consulta",
+  "is_from_lead": true,
+  "created_at": "2026-01-09T14:30:00Z"
+}
+```
+
+**Uso típico:**
+```sql
+-- Buscar histórico de uma conversa
+SELECT message_text, is_from_lead, created_at
+FROM agent_conversation_messages
+WHERE conversation_id = 'UUID_DA_CONVERSA'
+ORDER BY created_at ASC;
+```
+
+---
+
+### 3.3 `messages` ⭐ (3.660 registros)
+
+> **Status:** POPULADA - 3ª tabela mais ativa
+> **Propósito:** Mensagens gerais com embeddings para busca semântica
+
+| Coluna | Tipo | Exemplo | Descrição |
+|--------|------|---------|-----------|
+| `id` | uuid | `uuid` | PK |
+| `contact_id` | text | `xFtXlhhyjyWQfUjsr8w3` | ID do contato |
+| `sender_name` | text | `João Silva` | Nome do remetente |
+| `sender_type` | text | `lead`, `agent` | Tipo do remetente |
+| `message_type` | text | `text` | Tipo da mensagem |
+| `message_body` | text | `Olá, quero agendar...` | Conteúdo |
+| `workflow_name` | text | `SDR Julia Amare` | Nome do workflow n8n |
+| `location_name` | text | `Instituto Amar` | Nome do cliente/tenant |
+| `sentiment` | text | `neutral`, `positive` | Análise de sentimento |
+| `is_group_message` | boolean | false | Se é mensagem de grupo |
+| `embedding` | vector(1536) | vetor | Embedding para busca semântica |
+| `created_at` | timestamptz | timestamp | Data criação |
+
+**Colunas adicionais (27 no total):**
+- `conversation_id`, `message_id`, `channel`
+- `contact_name`, `contact_email`, `contact_phone`
+- `location_id`, `workflow_id`, `execution_id`
+- `is_automated`, `automation_type`, `tags`
+- `metadata` (JSONB)
+
+**Exemplo de dados:**
+```json
+{
+  "sender_name": "Maria Santos",
+  "sender_type": "lead",
+  "message_body": "Olá! Vi o post sobre tratamento capilar",
+  "workflow_name": "SDR Julia Amare",
+  "location_name": "Marina Couto",
+  "sentiment": "positive"
+}
+```
+
+---
+
+### 3.4 `portal_conversations`
 
 > **Status:** VAZIA
 > **Propósito:** Conversas sincronizadas do GHL para o Portal CRM
@@ -602,6 +698,52 @@ Este documento serve como referência para o schema do banco de dados Supabase u
 
 ---
 
+### 7.2 `fin_categorias` ⭐ (123 registros)
+
+> **Status:** POPULADA - Categorias financeiras
+> **Propósito:** Categorização hierárquica de receitas e despesas
+
+| Coluna | Tipo | Exemplo | Descrição |
+|--------|------|---------|-----------|
+| `id` | uuid | `uuid` | PK |
+| `nome` | text | `Assinaturas SaaS`, `Salários` | Nome da categoria |
+| `categoria_pai_id` | uuid | null ou uuid | FK para categoria pai (hierarquia) |
+| `tipo` | text | `receita`, `despesa` | Tipo da categoria |
+| `ativo` | boolean | true | Se está ativa |
+| `cor` | text | `#4CAF50`, `#F44336` | Cor para display |
+| `icone` | text | `credit-card`, `building` | Ícone para display |
+| `ordem` | integer | 1, 2, 3... | Ordem de exibição |
+| `created_at` | timestamptz | timestamp | Data criação |
+
+**Hierarquia de categorias:**
+```
+Despesas (categoria_pai_id = null)
+├── Infraestrutura
+│   ├── Assinaturas SaaS
+│   ├── Servidores
+│   └── Domínios
+├── Marketing
+│   ├── Tráfego Pago
+│   └── Conteúdo
+└── Operacional
+    ├── Salários
+    └── Impostos
+```
+
+**Exemplo de dados:**
+```json
+{
+  "nome": "Assinaturas SaaS",
+  "tipo": "despesa",
+  "cor": "#9C27B0",
+  "icone": "credit-card",
+  "ativo": true,
+  "categoria_pai_id": "uuid-da-categoria-infraestrutura"
+}
+```
+
+---
+
 ## 8. Tabelas de IA/RAG
 
 ### 8.1 `rag_knowledge` (Segundo Cérebro)
@@ -638,7 +780,144 @@ Este documento serve como referência para o schema do banco de dados Supabase u
 
 ---
 
-## 9. Relacionamentos Entre Tabelas
+## 9. Tabelas de Integração n8n
+
+### 9.1 `n8n_active_conversation` ⭐ (618 registros)
+
+> **Status:** POPULADA - 4ª tabela mais ativa
+> **Propósito:** Conversas ativas gerenciadas pelo n8n (controle de fluxo)
+
+| Coluna | Tipo | Exemplo | Descrição |
+|--------|------|---------|-----------|
+| `id` | text | `rec_abc123` | ID único do registro |
+| `lead_id` | text | `xFtXlhhyjyWQfUjsr8w3` | ID do lead no GHL |
+| `lead_name` | text | `Maria Silva` | Nome do lead |
+| `status` | text | `active`, `paused`, `completed` | Status da conversa |
+| `owner_id` | text | `user_123` | ID do usuário/owner |
+| `workflow_id` | text | `wf_SDR_Julia` | ID do workflow n8n |
+| `retries` | integer | 0, 1, 2 | Número de tentativas |
+| `last_message_at` | timestamptz | timestamp | Última mensagem |
+| `created_at` | timestamptz | timestamp | Criação |
+| `updated_at` | timestamptz | timestamp | Atualização |
+
+**Uso típico:**
+```sql
+-- Conversas ativas para processar
+SELECT lead_id, lead_name, workflow_id, retries
+FROM n8n_active_conversation
+WHERE status = 'active'
+  AND retries < 3
+ORDER BY last_message_at DESC;
+```
+
+---
+
+### 9.2 `n8n_historico_mensagens` ⭐ (194 registros)
+
+> **Status:** POPULADA
+> **Propósito:** Histórico de mensagens para memória de contexto nos workflows n8n
+
+| Coluna | Tipo | Exemplo | Descrição |
+|--------|------|---------|-----------|
+| `id` | serial | 1, 2, 3... | PK auto-increment |
+| `session_id` | text | `sess_abc123` | ID da sessão de conversa |
+| `message` | jsonb | `{type, content}` | Mensagem em formato JSONB |
+| `message_hash` | text | `md5_hash` | Hash MD5 para deduplicação |
+| `location_id` | text | `Bgi2hFMgiLLoRlOO0K5b` | Location GHL |
+| `created_at` | timestamptz | timestamp | Data criação |
+
+**Estrutura do campo `message` (JSONB):**
+```json
+{
+  "type": "ai",       // ou "human"
+  "content": "Olá! Como posso ajudar você hoje?"
+}
+```
+
+**Tipos de mensagem:**
+- `ai` - Mensagem do agente IA
+- `human` - Mensagem do lead/humano
+
+**Uso típico:**
+```sql
+-- Buscar histórico de uma sessão
+SELECT message->>'type' as tipo,
+       message->>'content' as conteudo,
+       created_at
+FROM n8n_historico_mensagens
+WHERE session_id = 'SESSAO_ID'
+ORDER BY created_at ASC;
+```
+
+---
+
+## 10. Tabelas Claude Code
+
+### 10.1 `claude_conversations` ⭐ (177 registros)
+
+> **Status:** POPULADA
+> **Propósito:** Histórico de conversas com Claude Code (memória persistente)
+
+| Coluna | Tipo | Exemplo | Descrição |
+|--------|------|---------|-----------|
+| `id` | uuid | `uuid` | PK |
+| `session_id` | text | `sess_20260109_abc123` | ID único da sessão |
+| `project_key` | text | `socialfy`, `ai-factory-agents` | Projeto relacionado |
+| `role` | text | `assistant`, `user` | Papel (IA ou usuário) |
+| `content` | text | Texto da mensagem | Conteúdo da mensagem |
+| `platform` | text | `claude-code` | Plataforma de origem |
+| `ai_model_used` | text | `claude-sonnet-4-5`, `claude-opus-4-5` | Modelo utilizado |
+| `session_status` | text | `active`, `completed` | Status da sessão |
+| `tokens_input` | integer | 1500 | Tokens de entrada |
+| `tokens_output` | integer | 800 | Tokens de saída |
+| `cost_usd` | decimal | 0.0045 | Custo em USD |
+| `execution_time_ms` | integer | 2500 | Tempo de execução |
+| `error_message` | text | null | Erro (se houver) |
+| `metadata` | jsonb | `{}` | Metadados adicionais |
+| `created_at` | timestamptz | timestamp | Data criação |
+| `updated_at` | timestamptz | timestamp | Atualização |
+
+**Project keys conhecidos:**
+- `socialfy` - Socialfy CRM
+- `ai-factory-agents` - Agentes de IA
+- `segundo-cerebro` - Sistema RAG
+- `mottivme-geral` - Operações gerais
+- `assembly-line` - Assembly Line SaaS
+
+**Exemplo de dados:**
+```json
+{
+  "session_id": "sess_20260109_abc123",
+  "project_key": "socialfy",
+  "role": "assistant",
+  "content": "Vou analisar a estrutura do banco de dados...",
+  "platform": "claude-code",
+  "ai_model_used": "claude-sonnet-4-5",
+  "session_status": "active"
+}
+```
+
+**Uso típico:**
+```sql
+-- Buscar últimas conversas de um projeto
+SELECT session_id, role, content, ai_model_used, created_at
+FROM claude_conversations
+WHERE project_key = 'socialfy'
+ORDER BY created_at DESC
+LIMIT 20;
+
+-- Custo total por projeto
+SELECT project_key,
+       SUM(cost_usd) as custo_total,
+       COUNT(*) as total_mensagens
+FROM claude_conversations
+GROUP BY project_key
+ORDER BY custo_total DESC;
+```
+
+---
+
+## 11. Relacionamentos Entre Tabelas
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -662,10 +941,32 @@ Este documento serve como referência para o schema do banco de dados Supabase u
 │       │                               │                              │
 │       ▼                               ▼                              │
 │  agentic_instagram_leads      agent_conversations                    │
+│       │                               │                              │
+│       │ lead_id                       │ conversation_id              │
+│       ▼                               ▼                              │
+│  agentic_instagram_dm_sent    agent_conversation_messages            │
+│                                                                      │
+├─────────────────────────────────────────────────────────────────────┤
+│                     TABELAS DE INTEGRAÇÃO                            │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  n8n_active_conversation ◄───────► n8n_historico_mensagens          │
+│       │    (lead_id)                     (session_id)               │
 │       │                                                              │
-│       │ lead_id                                                      │
+│       │ location_id                                                  │
 │       ▼                                                              │
-│  agentic_instagram_dm_sent                                          │
+│  messages ◄────────────────────► llm_costs                          │
+│  (com embeddings)                 (custos de IA)                    │
+│                                                                      │
+├─────────────────────────────────────────────────────────────────────┤
+│                     TABELAS FINANCEIRAS                              │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  fin_categorias (hierárquica)                                        │
+│       │                                                              │
+│       │ categoria_id                                                 │
+│       ▼                                                              │
+│  fin_movimentacoes                                                   │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 
@@ -673,11 +974,14 @@ Chaves de Relacionamento:
 - location_id: Identifica o tenant/cliente (multi-tenant)
 - ghl_contact_id: ID do contato no GoHighLevel
 - lead_id: FK entre tabelas de leads
+- conversation_id: FK entre conversas e mensagens
+- session_id: ID de sessão para histórico de mensagens n8n
+- categoria_id: FK para categorias financeiras
 ```
 
 ---
 
-## 10. Enums e Valores Válidos
+## 12. Enums e Valores Válidos
 
 ### Funnel Stages (Growth OS)
 ```
@@ -806,12 +1110,16 @@ ORDER BY date DESC;
 
 1. **Multi-tenant:** Use sempre `location_id` para filtrar dados por cliente
 2. **RLS:** Tabelas do portal têm Row Level Security habilitado
-3. **Embeddings:** Tabela `rag_knowledge` usa pgvector para busca semântica
+3. **Embeddings:** Tabelas `rag_knowledge` e `messages` usam pgvector para busca semântica
 4. **GHL IDs:** Campos `ghl_contact_id` e `ghl_conversation_id` linkam com GoHighLevel
 5. **Timestamps:** Use `timestamptz` (com timezone) para datas
+6. **n8n Integration:** Tabelas `n8n_active_conversation` e `n8n_historico_mensagens` para controle de fluxo
+7. **Claude Code:** Tabela `claude_conversations` para memória persistente de sessões
 
 ---
 
-> **Gerado em:** 2026-01-08
+> **Gerado em:** 2026-01-09
+> **Atualizado em:** 2026-01-09 (adicionadas 6 tabelas mais ativas)
 > **Autor:** Claude Code
 > **Projeto:** MOTTIVME Sales
+> **Tabelas documentadas:** 20
