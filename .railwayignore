@@ -1,0 +1,27 @@
+# Large directories
+node_modules/
+frontend/
+backups/
+.git/
+
+# Cache
+__pycache__/
+*.pyc
+.next/
+.cache/
+
+# Logs
+logs/
+*.log
+
+# Local development
+.env
+.env.local
+sessions/
+*.session.json
+service_account.json
+
+# Tests and docs
+tests/
+docs/
+*.md
