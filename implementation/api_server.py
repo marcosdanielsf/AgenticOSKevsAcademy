@@ -1120,7 +1120,7 @@ async def webhook_inbound_dm(request: InboundDMRequest):
     Flow:
     1. Scrape profile using Instagram API
     2. Calculate lead score
-    3. Save to Supabase (crm_leads + socialfy_leads)
+    3. Save to Supabase (crm_leads + growth_leads)
     4. Generate AI classification and suggested response
     5. Return lead data with score and suggested response
     """
@@ -2652,7 +2652,7 @@ async def match_lead_context(request: MatchLeadContextRequest):
         if request.ghl_contact_id:
             try:
                 response = requests.get(
-                    f"{db.base_url}/socialfy_leads",
+                    f"{db.base_url}/growth_leads",
                     headers=db.headers,
                     params={
                         "ghl_contact_id": f"eq.{request.ghl_contact_id}",
@@ -2673,9 +2673,9 @@ async def match_lead_context(request: MatchLeadContextRequest):
         # ============================================
         if not lead and phone_normalized:
             try:
-                # Tentar em socialfy_leads
+                # Tentar em growth_leads
                 response = requests.get(
-                    f"{db.base_url}/socialfy_leads",
+                    f"{db.base_url}/growth_leads",
                     headers=db.headers,
                     params={
                         "phone": f"eq.{phone_normalized}",
@@ -2714,7 +2714,7 @@ async def match_lead_context(request: MatchLeadContextRequest):
         if not lead and email_normalized:
             try:
                 response = requests.get(
-                    f"{db.base_url}/socialfy_leads",
+                    f"{db.base_url}/growth_leads",
                     headers=db.headers,
                     params={
                         "email": f"eq.{email_normalized}",
@@ -2731,15 +2731,15 @@ async def match_lead_context(request: MatchLeadContextRequest):
                 logger.warning(f"Erro match email: {e}")
 
         # ============================================
-        # TENTATIVA 4: Match por instagram_handle
+        # TENTATIVA 4: Match por instagram_username
         # ============================================
         if not lead and ig_handle_normalized:
             try:
                 response = requests.get(
-                    f"{db.base_url}/socialfy_leads",
+                    f"{db.base_url}/growth_leads",
                     headers=db.headers,
                     params={
-                        "instagram_handle": f"eq.{ig_handle_normalized}",
+                        "instagram_username": f"eq.{ig_handle_normalized}",
                         "limit": 1
                     }
                 )
@@ -2775,8 +2775,8 @@ async def match_lead_context(request: MatchLeadContextRequest):
                         lead = {
                             "id": ig_lead.get("id"),
                             "name": ig_lead.get("full_name"),
-                            "instagram_handle": f"@{ig_lead.get('username')}",
-                            "source": "instagram_scrape",
+                            "instagram_username": ig_lead.get('username'),
+                            "source_channel": "instagram_scrape",
                             "ig_followers": ig_lead.get("followers"),
                             "ig_bio": ig_lead.get("bio"),
                             "created_at": ig_lead.get("created_at")
@@ -2868,12 +2868,14 @@ async def match_lead_context(request: MatchLeadContextRequest):
         # ============================================
         # DETERMINAR SE FOI PROSPECTADO
         # ============================================
-        source = lead.get("source", "")
+        source_channel = lead.get("source_channel", "")
+        funnel_stage = lead.get("funnel_stage", "")
         was_prospected = any([
-            source.startswith("outbound"),
-            source.startswith("instagram_scrape"),
-            source.startswith("linkedin_scrape"),
-            lead.get("outreach_sent_at") is not None
+            source_channel.startswith("outbound") if source_channel else False,
+            source_channel.startswith("instagram_scrape") if source_channel else False,
+            source_channel.startswith("linkedin_scrape") if source_channel else False,
+            lead.get("outreach_sent_at") is not None,
+            funnel_stage == "prospected"
         ])
 
         # ============================================
@@ -2884,18 +2886,18 @@ async def match_lead_context(request: MatchLeadContextRequest):
             "name": lead.get("name") or lead.get("full_name") or request.first_name,
             "phone": lead.get("phone"),
             "email": lead.get("email"),
-            "instagram_handle": lead.get("instagram_handle"),
-            "cargo": enriched.get("cargo") or lead.get("cargo"),
-            "empresa": enriched.get("empresa") or lead.get("empresa"),
+            "instagram_username": lead.get("instagram_username"),
+            "cargo": enriched.get("cargo") or lead.get("cargo") or lead.get("title"),
+            "empresa": enriched.get("empresa") or lead.get("empresa") or lead.get("company"),
             "setor": enriched.get("setor") or lead.get("setor"),
             "porte": enriched.get("porte") or lead.get("porte"),
             "icp_score": lead.get("icp_score"),
-            "icp_tier": lead.get("icp_tier"),
+            "lead_temperature": lead.get("lead_temperature"),
             "ig_followers": enriched.get("ig_followers") or lead.get("ig_followers"),
             "ig_bio": enriched.get("ig_bio") or lead.get("ig_bio"),
             "ig_engagement": lead.get("ig_engagement"),
-            "source": lead.get("source"),
-            "status": lead.get("status"),
+            "source_channel": lead.get("source_channel"),
+            "funnel_stage": lead.get("funnel_stage"),
             "ghl_contact_id": lead.get("ghl_contact_id"),
             "location_id": lead.get("location_id"),
             "created_at": lead.get("created_at")
@@ -2911,7 +2913,7 @@ async def match_lead_context(request: MatchLeadContextRequest):
             "prospected_at": lead.get("outreach_sent_at"),
             "outreach_message": lead.get("last_outreach_message"),
             "outreach_channel": lead.get("source_channel") or (
-                "instagram_dm" if "instagram" in str(lead.get("source", "")).lower() else None
+                "instagram_dm" if "instagram" in str(lead.get("source_channel", "")).lower() else None
             )
         }
 
@@ -2931,8 +2933,8 @@ async def match_lead_context(request: MatchLeadContextRequest):
                 contexto_prospeccao += f" via {prospecting_context['outreach_channel']}"
             if lead_data.get("cargo") and lead_data.get("empresa"):
                 contexto_prospeccao += f". Identificado como {lead_data['cargo']} na {lead_data['empresa']}."
-            if lead_data.get("icp_tier"):
-                contexto_prospeccao += f" Classificado como {lead_data['icp_tier']}."
+            if lead_data.get("lead_temperature"):
+                contexto_prospeccao += f" Classificado como {lead_data['lead_temperature']}."
 
         placeholders = {
             "{{nome}}": nome,
@@ -2943,12 +2945,12 @@ async def match_lead_context(request: MatchLeadContextRequest):
             "{{setor}}": lead_data.get("setor", ""),
             "{{porte}}": lead_data.get("porte", ""),
             "{{icp_score}}": str(lead_data.get("icp_score", "")),
-            "{{icp_tier}}": lead_data.get("icp_tier", ""),
+            "{{lead_temperature}}": lead_data.get("lead_temperature", ""),
             "{{ig_followers}}": str(lead_data.get("ig_followers", "")),
             "{{ig_bio}}": lead_data.get("ig_bio", ""),
             "{{contexto_prospeccao}}": contexto_prospeccao,
             "{{foi_prospectado}}": "sim" if was_prospected else "não",
-            "{{fonte}}": lead_data.get("source", "")
+            "{{fonte}}": lead_data.get("source_channel", "")
         }
         # Remover placeholders vazios
         placeholders = {k: v for k, v in placeholders.items() if v}
@@ -3108,7 +3110,7 @@ async def auto_enrich_lead(request: AutoEnrichRequest):
                 source=request.source_channel or "inbound_dm",
                 profile_data={
                     "username": ig_handle,
-                    "instagram_handle": f"@{ig_handle}",
+                    "instagram_username": ig_handle,
                     "bio": profile.get("bio"),
                     "followers_count": profile.get("followers_count"),
                     "following_count": profile.get("following_count"),
@@ -3128,15 +3130,19 @@ async def auto_enrich_lead(request: AutoEnrichRequest):
             # ============================================
             # PASSO 5: Montar resposta com placeholders
             # ============================================
+            # Map classification to lead_temperature
+            classification = score_data.get("classification", "LEAD_COLD")
+            lead_temperature = "hot" if classification == "LEAD_HOT" else ("warm" if classification == "LEAD_WARM" else "cold")
+
             lead_data = {
                 "id": saved_lead.get("id") if saved_lead else None,
                 "name": lead_name,
-                "instagram_handle": f"@{ig_handle}",
+                "instagram_username": ig_handle,
                 "ig_followers": profile.get("followers_count", 0),
                 "ig_bio": profile.get("bio", ""),
                 "icp_score": score_data.get("score", 0),
-                "icp_tier": score_data.get("classification", "LEAD_COLD"),
-                "source": request.source_channel or "inbound_dm",
+                "lead_temperature": lead_temperature,
+                "source_channel": request.source_channel or "inbound_dm",
                 "is_business": profile.get("is_business", False),
                 "is_verified": profile.get("is_verified", False),
                 "category": profile.get("category")
@@ -3148,11 +3154,11 @@ async def auto_enrich_lead(request: AutoEnrichRequest):
                 "{{nome}}": primeiro_nome,
                 "{{primeiro_nome}}": primeiro_nome,
                 "{{nome_completo}}": lead_name,
-                "{{ig_handle}}": f"@{ig_handle}",
+                "{{instagram_username}}": ig_handle,
                 "{{ig_followers}}": str(profile.get("followers_count", 0)),
                 "{{ig_bio}}": profile.get("bio", ""),
                 "{{icp_score}}": str(score_data.get("score", 0)),
-                "{{icp_tier}}": score_data.get("classification", "LEAD_COLD"),
+                "{{lead_temperature}}": lead_temperature,
                 "{{fonte}}": request.source_channel or "inbound_dm",
                 "{{categoria}}": profile.get("category", ""),
                 "{{foi_prospectado}}": "não",

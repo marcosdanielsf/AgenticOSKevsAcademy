@@ -63,8 +63,8 @@ async def sync_lead(
 
     # 1. Buscar dados do lead no source
     if source == "agenticos":
-        # Buscar em socialfy_leads
-        lead_result = supabase._request('GET', 'socialfy_leads', params={
+        # Buscar em growth_leads
+        lead_result = supabase._request('GET', 'growth_leads', params={
             'id': f'eq.{lead_id}',
             'limit': 1
         })
@@ -108,13 +108,13 @@ async def sync_lead(
         "name": lead.get("name") or lead.get("contact_name"),
         "phone": lead.get("phone") or lead.get("contact_phone"),
         "email": lead.get("email") or lead.get("contact_email"),
-        "instagram_handle": lead.get("instagram_handle") or lead.get("ig_handle"),
-        "cargo": enriched.get("cargo") or source_data.get("cargo"),
-        "empresa": enriched.get("empresa") or source_data.get("empresa"),
+        "instagram_username": lead.get("instagram_username") or lead.get("ig_handle"),
+        "cargo": enriched.get("cargo") or source_data.get("cargo") or lead.get("title"),
+        "empresa": enriched.get("empresa") or source_data.get("empresa") or lead.get("company"),
         "setor": enriched.get("setor") or source_data.get("setor"),
         "porte": enriched.get("porte") or source_data.get("porte"),
         "icp_score": lead.get("icp_score"),
-        "icp_tier": lead.get("icp_tier"),
+        "lead_temperature": lead.get("lead_temperature"),
         "synced_at": datetime.utcnow().isoformat()
     }
 
@@ -123,10 +123,11 @@ async def sync_lead(
 
     # 3. Sincronizar para target
     if target == "ai_factory":
-        # Verificar se tabela unified_leads existe, senao usa socialfy_leads
-        result = supabase._request('POST', 'socialfy_leads', data={
+        # Sincroniza para growth_leads
+        result = supabase._request('POST', 'growth_leads', data={
             **sync_data,
-            "source": f"sync_from_{source}",
+            "source_channel": f"sync_from_{source}",
+            "location_id": lead.get("location_id") or "DEFAULT_LOCATION",
             "updated_at": datetime.utcnow().isoformat()
         })
 
@@ -140,7 +141,7 @@ async def sync_lead(
             "lead_setor": sync_data.get("setor"),
             "lead_porte": sync_data.get("porte"),
             "icp_score": str(sync_data.get("icp_score", 0)),
-            "icp_tier": sync_data.get("icp_tier"),
+            "lead_temperature": sync_data.get("lead_temperature"),
             "agenticos_id": lead_id,
             "enriched_at": datetime.utcnow().isoformat()
         }
@@ -163,8 +164,8 @@ async def sync_lead(
         )
 
     elif target == "agenticos":
-        # Atualizar no AgenticOS
-        result = supabase._request('PATCH', 'socialfy_leads',
+        # Atualizar no AgenticOS (growth_leads)
+        result = supabase._request('PATCH', 'growth_leads',
             params={'id': f'eq.{lead_id}'},
             data={
                 **sync_data,

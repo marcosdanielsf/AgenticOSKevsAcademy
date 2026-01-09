@@ -47,13 +47,13 @@ def normalize_phone(phone: str) -> str:
 
 
 def normalize_instagram(handle: str) -> str:
-    """Normaliza handle do Instagram."""
+    """Normaliza handle do Instagram - sem @ para growth_leads."""
     # Remove @ se tiver
     handle = handle.lstrip("@")
     # Remove URL se for
     if "instagram.com" in handle:
         handle = handle.split("/")[-1].split("?")[0]
-    return f"@{handle.lower()}"
+    return handle.lower()  # growth_leads usa username sem @
 
 
 def consolidate_enrichment(enriched_list: list) -> Dict:
@@ -126,7 +126,7 @@ async def get_lead_by_channel(
 
     # Mapear canal para campo de busca
     field_map = {
-        "instagram": "instagram_handle",
+        "instagram": "instagram_username",
         "whatsapp": "phone",
         "email": "email",
         "facebook": "facebook_id",
@@ -150,8 +150,8 @@ async def get_lead_by_channel(
         identifier = identifier.lower().strip()
 
     # Buscar lead
-    # Tentar primeiro em socialfy_leads
-    lead_result = supabase._request('GET', 'socialfy_leads', params={
+    # Tentar primeiro em growth_leads
+    lead_result = supabase._request('GET', 'growth_leads', params={
         field: f'eq.{identifier}',
         'limit': 1
     })
@@ -182,12 +182,14 @@ async def get_lead_by_channel(
     enrichment = consolidate_enrichment(enriched_list)
 
     # Determinar se foi prospectado
-    source = lead.get("source", "")
+    source_channel = lead.get("source_channel", "")
+    funnel_stage = lead.get("funnel_stage", "")
     was_prospected = any([
-        source.startswith("outbound"),
-        source.startswith("instagram_scrape"),
-        source.startswith("linkedin_scrape"),
-        lead.get("outreach_sent_at") is not None
+        source_channel.startswith("outbound") if source_channel else False,
+        source_channel.startswith("instagram_scrape") if source_channel else False,
+        source_channel.startswith("linkedin_scrape") if source_channel else False,
+        lead.get("outreach_sent_at") is not None,
+        funnel_stage == "prospected"
     ])
 
     # Montar resposta
@@ -196,23 +198,23 @@ async def get_lead_by_channel(
         "name": lead.get("name"),
         "email": lead.get("email"),
         "phone": lead.get("phone"),
-        "instagram_handle": lead.get("instagram_handle"),
+        "instagram_username": lead.get("instagram_username"),
 
         # Dados de qualificacao
         "icp_score": lead.get("icp_score"),
-        "icp_tier": lead.get("icp_tier"),
-        "status": lead.get("status"),
+        "lead_temperature": lead.get("lead_temperature"),
+        "funnel_stage": lead.get("funnel_stage"),
 
         # Dados enriquecidos consolidados
-        "cargo": enrichment.get("cargo"),
-        "empresa": enrichment.get("empresa"),
+        "cargo": enrichment.get("cargo") or lead.get("title"),
+        "empresa": enrichment.get("empresa") or lead.get("company"),
         "setor": enrichment.get("setor"),
         "porte": enrichment.get("porte"),
         "ig_followers": enrichment.get("ig_followers"),
         "ig_engagement": enrichment.get("ig_engagement"),
 
         # Metadata
-        "source": lead.get("source"),
+        "source_channel": lead.get("source_channel"),
         "ghl_contact_id": lead.get("ghl_contact_id"),
         "location_id": lead.get("location_id"),
         "created_at": lead.get("created_at"),
@@ -285,8 +287,8 @@ async def get_lead_context_for_ai(
         context_parts.append(f"- Porte: {lead['porte']}")
 
     if lead.get("icp_score"):
-        tier = lead.get("icp_tier", "")
-        context_parts.append(f"- ICP Score: {lead['icp_score']}/100 ({tier})")
+        temp = lead.get("lead_temperature", "")
+        context_parts.append(f"- ICP Score: {lead['icp_score']}/100 ({temp})")
 
     if lead.get("ig_followers"):
         context_parts.append(f"- Seguidores IG: {lead['ig_followers']}")

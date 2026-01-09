@@ -336,9 +336,9 @@ class SupabaseDB:
                 'dms_failed': dms_failed
             })
 
-    def sync_to_socialfy_leads(self, username: str, message_sent: str, lead_data: dict = None):
+    def sync_to_growth_leads(self, username: str, message_sent: str, lead_data: dict = None):
         """
-        Sincroniza lead prospectado para socialfy_leads.
+        Sincroniza lead prospectado para growth_leads.
         Isso permite que o n8n saiba que o lead foi prospectado quando ele responder.
 
         Args:
@@ -347,12 +347,13 @@ class SupabaseDB:
             lead_data: Dados adicionais do lead (full_name, bio, followers, etc)
         """
         try:
-            ig_handle = f"@{username}" if not username.startswith("@") else username
+            # growth_leads usa instagram_username sem @ prefix
+            ig_username = username.lstrip("@")
             now = datetime.now().isoformat()
 
-            # Verificar se já existe em socialfy_leads
-            existing = self._request("GET", "socialfy_leads", params={
-                "instagram_handle": f"eq.{ig_handle}",
+            # Verificar se já existe em growth_leads
+            existing = self._request("GET", "growth_leads", params={
+                "instagram_username": f"eq.{ig_username}",
                 "limit": 1
             })
 
@@ -360,38 +361,56 @@ class SupabaseDB:
 
             if existing:
                 # Atualizar registro existente
-                self._request("PATCH", "socialfy_leads",
+                self._request("PATCH", "growth_leads",
                     params={"id": f"eq.{existing[0]['id']}"},
                     data={
                         'outreach_sent_at': now,
                         'last_outreach_message': message_sent[:500] if message_sent else None,
-                        'source': 'outbound_instagram_dm',
+                        'source_channel': 'outbound_instagram_dm',
+                        'funnel_stage': 'prospected',
                         'updated_at': now
                     }
                 )
-                logger.info(f"✅ Sync: Atualizado socialfy_leads para @{username}")
+                logger.info(f"✅ Sync: Atualizado growth_leads para @{username}")
             else:
                 # Criar novo registro
-                self._request("POST", "socialfy_leads", data={
-                    'instagram_handle': ig_handle,
+                # Build custom_fields with Instagram data
+                custom_fields = {
+                    'instagram_bio': lead_info.get('bio'),
+                    'instagram_followers': lead_info.get('followers_count'),
+                    'instagram_following': lead_info.get('following_count'),
+                    'instagram_posts': lead_info.get('media_count'),
+                    'instagram_is_verified': lead_info.get('is_verified'),
+                    'instagram_is_business': lead_info.get('is_business_account'),
+                }
+                # Remove None values from custom_fields
+                custom_fields = {k: v for k, v in custom_fields.items() if v is not None}
+
+                self._request("POST", "growth_leads", data={
+                    'instagram_username': ig_username,
                     'name': lead_info.get('full_name') or username,
-                    'source': 'outbound_instagram_dm',
-                    'source_channel': 'instagram_dm',
+                    'source_channel': 'outbound_instagram_dm',
                     'outreach_sent_at': now,
                     'last_outreach_message': message_sent[:500] if message_sent else None,
-                    'ig_bio': lead_info.get('bio'),
-                    'ig_followers': lead_info.get('followers_count'),
-                    'status': 'prospected',
+                    'funnel_stage': 'prospected',
+                    'lead_temperature': 'cold',
+                    'location_id': 'DEFAULT_LOCATION',  # Required field
+                    'custom_fields': custom_fields,
                     'created_at': now,
                     'updated_at': now
                 })
-                logger.info(f"✅ Sync: Criado socialfy_leads para @{username}")
+                logger.info(f"✅ Sync: Criado growth_leads para @{username}")
 
             return True
 
         except Exception as e:
             logger.warning(f"⚠️ Sync falhou para @{username}: {e}")
             return False
+
+    # Alias for backwards compatibility
+    def sync_to_socialfy_leads(self, username: str, message_sent: str, lead_data: dict = None):
+        """Deprecated: Use sync_to_growth_leads instead"""
+        return self.sync_to_growth_leads(username, message_sent, lead_data)
 
 
 # ============================================
@@ -846,13 +865,17 @@ class InstagramDMAgent:
 
                 if result.success:
                     self.dms_sent += 1
-                    # Sincronizar com socialfy_leads para que n8n saiba que foi prospectado
+                    # Sincronizar com growth_leads para que n8n saiba que foi prospectado
                     lead_data = {
                         'full_name': lead.full_name,
                         'bio': lead.bio,
-                        'followers_count': getattr(profile, 'followers_count', None) if self.smart_mode and profile else None
+                        'followers_count': getattr(profile, 'followers_count', None) if self.smart_mode and profile else None,
+                        'following_count': getattr(profile, 'following_count', None) if self.smart_mode and profile else None,
+                        'media_count': getattr(profile, 'media_count', None) if self.smart_mode and profile else None,
+                        'is_verified': getattr(profile, 'is_verified', None) if self.smart_mode and profile else None,
+                        'is_business_account': getattr(profile, 'is_business_account', None) if self.smart_mode and profile else None
                     }
-                    self.db.sync_to_socialfy_leads(lead.username, result.message_sent, lead_data)
+                    self.db.sync_to_growth_leads(lead.username, result.message_sent, lead_data)
                 else:
                     self.dms_failed += 1
 

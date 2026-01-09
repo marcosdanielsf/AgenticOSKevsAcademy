@@ -7,7 +7,7 @@ Connects our 23 Python agents to the existing Socialfy Platform Supabase tables.
 Tables Mapping:
 - crm_leads: Lead data from Instagram/LinkedIn scraping
 - socialfy_messages: Messages sent/received
-- socialfy_leads: Lead intelligence data
+- growth_leads: Lead intelligence data (migrated from socialfy_leads)
 - agent_conversations: AI agent conversation tracking
 - llm_costs: AI/LLM cost tracking
 - socialfy_analytics_daily: Daily aggregated metrics
@@ -103,18 +103,23 @@ class SupabaseClient:
         return self._request('PATCH', f'crm_leads?id=eq.{lead_id}', data=updates)
 
     # ===========================================
-    # SOCIALFY LEADS (Profile Analyzer Agent)
+    # GROWTH LEADS (Profile Analyzer Agent)
     # ===========================================
 
+    def upsert_growth_lead(self, lead_data: Dict) -> Dict:
+        """Insert/update lead intelligence data in growth_leads"""
+        return self._request('POST', 'growth_leads', data=lead_data)
+
+    # Alias for backwards compatibility
     def upsert_socialfy_lead(self, lead_data: Dict) -> Dict:
-        """Insert/update lead intelligence data"""
-        return self._request('POST', 'socialfy_leads', data=lead_data)
+        """Deprecated: Use upsert_growth_lead instead"""
+        return self.upsert_growth_lead(lead_data)
 
     def update_icp_score(self, lead_id: str, icp_score: int, icp_analysis: Dict) -> Dict:
-        """Update ICP score for a lead"""
-        return self._request('PATCH', f'socialfy_leads?id=eq.{lead_id}', data={
+        """Update ICP score for a lead in growth_leads"""
+        return self._request('PATCH', f'growth_leads?id=eq.{lead_id}', data={
             'icp_score': icp_score,
-            'icp_analysis': icp_analysis,
+            'custom_fields': icp_analysis,  # icp_analysis goes into custom_fields
             'updated_at': datetime.now(timezone.utc).isoformat()
         })
 
