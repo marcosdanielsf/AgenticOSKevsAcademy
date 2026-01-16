@@ -4492,6 +4492,220 @@ async def run_health_check(background_tasks: BackgroundTasks):
 
 
 # ============================================
+# CAMPAIGN MANAGEMENT ENDPOINTS
+# ============================================
+
+class StartCampaignRequest(BaseModel):
+    """Request para iniciar campanha de prospecção."""
+    name: str = Field(..., description="Nome da campanha")
+    target_type: str = Field(..., description="Tipo de target: hashtag, profile, or leads")
+    target_value: str = Field(..., description="Valor do target (hashtag sem #, username, ou 'all')")
+    limit: int = Field(default=50, ge=1, le=500, description="Número máximo de leads")
+    min_score: int = Field(default=0, ge=0, le=100, description="Score mínimo para enviar DM (0=todos)")
+    template_id: int = Field(default=1, ge=1, description="ID do template de mensagem")
+    tenant_id: Optional[str] = Field(default="DEFAULT", description="ID do tenant")
+
+class CampaignStatusResponse(BaseModel):
+    """Response com status da campanha."""
+    success: bool
+    campaign_id: str
+    status: str  # pending, running, completed, failed
+    message: str
+    stats: Optional[Dict[str, Any]] = None
+
+# Store for running campaigns (in-memory, would use Redis in production)
+running_campaigns: Dict[str, Dict[str, Any]] = {}
+
+
+@app.post("/api/campaign/start", response_model=CampaignStatusResponse)
+async def start_campaign(
+    request: StartCampaignRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Inicia uma campanha de prospecção no Instagram.
+
+    Fluxo:
+    1. Se target_type == 'hashtag': Scrape posts da hashtag, extrai perfis, salva no banco
+    2. Se target_type == 'profile': Scrape followers do perfil
+    3. Se target_type == 'leads': Usa leads já existentes no banco
+    4. Filtra por min_score se especificado
+    5. Envia DMs personalizadas com rate limiting
+
+    Returns:
+        campaign_id: ID único da campanha para tracking
+        status: Status atual (pending, running, completed, failed)
+    """
+    import uuid
+
+    campaign_id = str(uuid.uuid4())[:8]
+
+    logger.info(f"🚀 Starting campaign {campaign_id}: {request.name}")
+    logger.info(f"   Target: {request.target_type}={request.target_value}")
+    logger.info(f"   Limit: {request.limit}, Min Score: {request.min_score}")
+
+    # Initialize campaign tracking
+    running_campaigns[campaign_id] = {
+        "id": campaign_id,
+        "name": request.name,
+        "status": "pending",
+        "target_type": request.target_type,
+        "target_value": request.target_value,
+        "limit": request.limit,
+        "min_score": request.min_score,
+        "tenant_id": request.tenant_id,
+        "started_at": datetime.now().isoformat(),
+        "stats": {
+            "leads_scraped": 0,
+            "dms_sent": 0,
+            "dms_failed": 0,
+            "dms_skipped": 0
+        }
+    }
+
+    # Define async task
+    async def run_campaign_task():
+        try:
+            running_campaigns[campaign_id]["status"] = "running"
+
+            # Step 1: Scrape leads if needed
+            if request.target_type == "hashtag":
+                logger.info(f"📸 Scraping hashtag #{request.target_value}...")
+                # Use existing scrape-hashtag endpoint logic
+                try:
+                    from instagram_dm_agent import InstagramDMAgent
+                    agent = InstagramDMAgent()
+                    # Scrape posts from hashtag
+                    scrape_result = agent.scrape_hashtag_posts(request.target_value, limit=request.limit)
+                    running_campaigns[campaign_id]["stats"]["leads_scraped"] = scrape_result.get("count", 0)
+                except Exception as e:
+                    logger.warning(f"Hashtag scrape failed: {e}. Using existing leads.")
+
+            elif request.target_type == "profile":
+                logger.info(f"👥 Scraping followers from @{request.target_value}...")
+                try:
+                    from instagram_dm_agent import InstagramDMAgent
+                    agent = InstagramDMAgent()
+                    scrape_result = agent.scrape_followers(request.target_value, limit=request.limit)
+                    running_campaigns[campaign_id]["stats"]["leads_scraped"] = scrape_result.get("count", 0)
+                except Exception as e:
+                    logger.warning(f"Followers scrape failed: {e}. Using existing leads.")
+
+            # Step 2: Run DM campaign
+            logger.info(f"📨 Starting DM campaign with min_score={request.min_score}...")
+
+            try:
+                from instagram_dm_agent import InstagramDMAgent
+                agent = InstagramDMAgent(tenant_id=request.tenant_id)
+                await agent.run_campaign(
+                    limit=request.limit,
+                    template_id=request.template_id,
+                    min_score=request.min_score
+                )
+
+                # Update stats
+                running_campaigns[campaign_id]["stats"]["dms_sent"] = agent.dms_sent
+                running_campaigns[campaign_id]["stats"]["dms_failed"] = agent.dms_failed
+                running_campaigns[campaign_id]["stats"]["dms_skipped"] = agent.dms_skipped
+                running_campaigns[campaign_id]["status"] = "completed"
+                running_campaigns[campaign_id]["completed_at"] = datetime.now().isoformat()
+
+            except Exception as e:
+                logger.error(f"Campaign error: {e}")
+                running_campaigns[campaign_id]["status"] = "failed"
+                running_campaigns[campaign_id]["error"] = str(e)
+
+        except Exception as e:
+            logger.error(f"Campaign task error: {e}")
+            running_campaigns[campaign_id]["status"] = "failed"
+            running_campaigns[campaign_id]["error"] = str(e)
+
+    # Start campaign in background
+    background_tasks.add_task(run_campaign_task)
+
+    return CampaignStatusResponse(
+        success=True,
+        campaign_id=campaign_id,
+        status="pending",
+        message=f"Campaign '{request.name}' started. Use GET /api/campaign/{campaign_id} to check status.",
+        stats=running_campaigns[campaign_id]["stats"]
+    )
+
+
+@app.get("/api/campaign/{campaign_id}", response_model=CampaignStatusResponse)
+async def get_campaign_status(campaign_id: str):
+    """
+    Retorna status de uma campanha específica.
+    """
+    if campaign_id not in running_campaigns:
+        raise HTTPException(status_code=404, detail=f"Campaign {campaign_id} not found")
+
+    campaign = running_campaigns[campaign_id]
+
+    return CampaignStatusResponse(
+        success=True,
+        campaign_id=campaign_id,
+        status=campaign["status"],
+        message=f"Campaign '{campaign['name']}' is {campaign['status']}",
+        stats=campaign.get("stats")
+    )
+
+
+@app.get("/api/campaigns")
+async def list_campaigns(
+    status: Optional[str] = None,
+    limit: int = 20
+):
+    """
+    Lista todas as campanhas.
+    """
+    campaigns = list(running_campaigns.values())
+
+    # Filter by status if specified
+    if status:
+        campaigns = [c for c in campaigns if c["status"] == status]
+
+    # Sort by started_at desc
+    campaigns.sort(key=lambda x: x.get("started_at", ""), reverse=True)
+
+    # Limit results
+    campaigns = campaigns[:limit]
+
+    return {
+        "success": True,
+        "total": len(campaigns),
+        "campaigns": campaigns
+    }
+
+
+@app.post("/api/campaign/{campaign_id}/stop")
+async def stop_campaign(campaign_id: str):
+    """
+    Para uma campanha em execução.
+    """
+    if campaign_id not in running_campaigns:
+        raise HTTPException(status_code=404, detail=f"Campaign {campaign_id} not found")
+
+    campaign = running_campaigns[campaign_id]
+
+    if campaign["status"] != "running":
+        return {
+            "success": False,
+            "message": f"Campaign is not running (current status: {campaign['status']})"
+        }
+
+    # Mark as stopped
+    campaign["status"] = "stopped"
+    campaign["stopped_at"] = datetime.now().isoformat()
+
+    return {
+        "success": True,
+        "message": f"Campaign '{campaign['name']}' stopped",
+        "stats": campaign.get("stats")
+    }
+
+
+# ============================================
 # MAIN
 # ============================================
 
