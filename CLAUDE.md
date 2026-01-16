@@ -80,7 +80,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. PROSPECTOR (instagram_dm_agent.py)
    └─> Scrape leads → agentic_instagram_leads
    └─> Envia DM → agentic_instagram_dm_sent
-   └─> ❌ NÃO sincroniza com GHL/socialfy_leads
+   └─> ✅ Sincroniza com growth_leads (Supabase)
+   └─> ✅ Sincroniza com GHL (sync_to_ghl) - Tags: prospectado, outbound-instagram
 
 2. LEAD RESPONDE (via GHL)
    └─> Webhook dispara n8n
@@ -95,15 +96,48 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## ⚠️ BUGS CONHECIDOS
 
 ### Bug 1: Tag `ativar_ia` tratada como prospecção
+- **Status:** ❌ NÃO EXISTE - Código está correto
 - **Arquivo:** `implementation/api_server.py`
-- **Linha:** 3177
-- **Problema:** `ativar_ia` está na lista `prospecting_tags`
-- **Impacto:** Leads com flag de ativação são tratados como prospectados
+- **Linha:** 3515
+- **Análise:** O código tem comentário explícito excluindo tags de ativação da lista de prospecção
 
-### Bug 2: Prospector não sincroniza
+### Bug 2: Prospector não sincroniza com GHL
+- **Status:** ✅ CORRIGIDO em 2026-01-16
 - **Arquivo:** `implementation/instagram_dm_agent.py`
-- **Problema:** Após enviar DM, não seta `outreach_sent_at` nem adiciona tag no GHL
-- **Impacto:** n8n não sabe que lead foi prospectado
+- **Solução:** Adicionado método `sync_to_ghl()` (linhas 420-522) que:
+  - Busca contato no GHL por instagram_username
+  - Atualiza ou cria contato com tags: prospectado, outbound-instagram
+  - Seta custom fields: outreach_sent_at, last_outreach_message, source_channel
+- **Variáveis de ambiente necessárias:**
+  - `GHL_API_KEY` ou `GHL_ACCESS_TOKEN`
+  - `GHL_LOCATION_ID` (default: DEFAULT_LOCATION)
+  - `GHL_API_URL` (default: https://services.leadconnectorhq.com)
+
+## ✅ FEATURES IMPLEMENTADAS
+
+### Lead Quality Scoring & Prioritization (2026-01-16)
+- **Arquivo:** `implementation/instagram_dm_agent.py`
+- **Funcionalidades:**
+  - Scores são persistidos no banco após cálculo
+  - Leads ordenados por prioridade: HOT > WARM > COLD > unscored
+  - Filtro opcional por `min_score` na campanha
+  - Novos campos: `icp_score`, `priority`, `scored_at`
+- **Uso:**
+  ```python
+  # Prospectar apenas leads HOT (score >= 70)
+  await agent.run_campaign(limit=100, min_score=70)
+
+  # Prospectar WARM + HOT (score >= 50)
+  await agent.run_campaign(limit=100, min_score=50)
+
+  # Prospectar todos (comportamento anterior)
+  await agent.run_campaign(limit=100, min_score=0)
+  ```
+- **Migração necessária:**
+  ```bash
+  # Executar no Supabase SQL Editor
+  psql -f migrations/add_lead_scoring_columns.sql
+  ```
 
 ---
 

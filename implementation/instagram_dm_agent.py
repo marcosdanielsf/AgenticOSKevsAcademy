@@ -81,6 +81,11 @@ MAX_DMS_PER_DAY = int(os.getenv("INSTAGRAM_DM_PER_DAY", 200))
 MIN_DELAY = int(os.getenv("INSTAGRAM_DM_DELAY_MIN", 30))
 MAX_DELAY = int(os.getenv("INSTAGRAM_DM_DELAY_MAX", 60))
 
+# GoHighLevel API
+GHL_API_URL = os.getenv("GHL_API_URL", "https://services.leadconnectorhq.com")
+GHL_API_KEY = os.getenv("GHL_API_KEY") or os.getenv("GHL_ACCESS_TOKEN")
+GHL_LOCATION_ID = os.getenv("GHL_LOCATION_ID", "DEFAULT_LOCATION")
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -104,6 +109,8 @@ class Lead:
     full_name: Optional[str] = None
     bio: Optional[str] = None
     source: Optional[str] = None
+    icp_score: Optional[int] = None  # 0-100 score calculado
+    priority: Optional[str] = None   # hot, warm, cold, nurturing
 
     @property
     def first_name(self) -> str:
@@ -229,8 +236,18 @@ class SupabaseDB:
         )
         logger.info(f"Ended run #{self.run_id} - Sent: {dms_sent}, Failed: {dms_failed}, Skipped: {dms_skipped}")
 
-    def get_leads_to_contact(self, limit: int = 200) -> List[Lead]:
-        """Get leads that haven't been contacted yet"""
+    def get_leads_to_contact(self, limit: int = 200, min_score: int = 0, prioritize_scored: bool = True) -> List[Lead]:
+        """
+        Get leads that haven't been contacted yet, with optional filtering and sorting.
+
+        Args:
+            limit: Maximum number of leads to return
+            min_score: Minimum ICP score required (0 = no filter, leads without score are included)
+            prioritize_scored: If True, sort HOT > WARM > COLD > unscored
+
+        Returns:
+            List of Lead objects sorted by priority
+        """
         # Get all leads
         leads_data = self._request("GET", "agentic_instagram_leads", params={"select": "*"})
 
@@ -242,18 +259,33 @@ class SupabaseDB:
         leads = []
         for lead_data in leads_data:
             if lead_data['username'] not in contacted_usernames:
+                lead_score = lead_data.get('icp_score')
+                lead_priority = lead_data.get('priority')
+
+                # Filter by min_score (leads without score pass through for first-time evaluation)
+                if min_score > 0 and lead_score is not None and lead_score < min_score:
+                    continue
+
                 leads.append(Lead(
                     id=lead_data['id'],
                     username=lead_data['username'],
                     full_name=lead_data.get('full_name'),
                     bio=lead_data.get('bio'),
-                    source=lead_data.get('source')
+                    source=lead_data.get('source'),
+                    icp_score=lead_score,
+                    priority=lead_priority
                 ))
 
-            if len(leads) >= limit:
-                break
+        # Sort by priority: HOT > WARM > COLD > None (unscored)
+        if prioritize_scored:
+            priority_order = {'hot': 0, 'warm': 1, 'cold': 2, 'nurturing': 3, None: 4}
+            leads.sort(key=lambda l: (priority_order.get(l.priority, 4), -(l.icp_score or 0)))
 
-        logger.info(f"Found {len(leads)} leads to contact (limit: {limit})")
+        # Apply limit after sorting
+        leads = leads[:limit]
+
+        scored_count = sum(1 for l in leads if l.icp_score is not None)
+        logger.info(f"Found {len(leads)} leads to contact (limit: {limit}, min_score: {min_score}, scored: {scored_count})")
         return leads
 
     def record_dm_sent(self, result: DMResult, template: str, account: str):
@@ -336,7 +368,7 @@ class SupabaseDB:
                 'dms_failed': dms_failed
             })
 
-    def sync_to_growth_leads(self, username: str, message_sent: str, lead_data: dict = None):
+    def sync_to_growth_leads(self, username: str, message_sent: str, lead_data: dict = None, score_data: dict = None):
         """
         Sincroniza lead prospectado para growth_leads.
         Isso permite que o n8n saiba que o lead foi prospectado quando ele responder.
@@ -345,6 +377,7 @@ class SupabaseDB:
             username: Instagram username do lead
             message_sent: Mensagem que foi enviada
             lead_data: Dados adicionais do lead (full_name, bio, followers, etc)
+            score_data: Dados de scoring (icp_score, priority) para sincronizar com growth_leads
         """
         try:
             # growth_leads usa instagram_username sem @ prefix
@@ -358,20 +391,28 @@ class SupabaseDB:
             })
 
             lead_info = lead_data or {}
+            score_info = score_data or {}
 
             if existing:
-                # Atualizar registro existente
+                # Atualizar registro existente - incluindo score se disponível
+                update_data = {
+                    'outreach_sent_at': now,
+                    'last_outreach_message': message_sent[:500] if message_sent else None,
+                    'source_channel': 'outbound_instagram_dm',
+                    'funnel_stage': 'prospected',
+                    'updated_at': now
+                }
+                # Adicionar score se disponível
+                if score_info.get('icp_score') is not None:
+                    update_data['icp_score'] = score_info['icp_score']
+                if score_info.get('priority'):
+                    update_data['lead_temperature'] = score_info['priority']  # hot/warm/cold
+
                 self._request("PATCH", "growth_leads",
                     params={"id": f"eq.{existing[0]['id']}"},
-                    data={
-                        'outreach_sent_at': now,
-                        'last_outreach_message': message_sent[:500] if message_sent else None,
-                        'source_channel': 'outbound_instagram_dm',
-                        'funnel_stage': 'prospected',
-                        'updated_at': now
-                    }
+                    data=update_data
                 )
-                logger.info(f"✅ Sync: Atualizado growth_leads para @{username}")
+                logger.info(f"✅ Sync: Atualizado growth_leads para @{username} (score: {score_info.get('icp_score', 'N/A')})")
             else:
                 # Criar novo registro
                 # Build custom_fields with Instagram data
@@ -386,20 +427,29 @@ class SupabaseDB:
                 # Remove None values from custom_fields
                 custom_fields = {k: v for k, v in custom_fields.items() if v is not None}
 
-                self._request("POST", "growth_leads", data={
+                # Preparar dados do novo lead
+                new_lead_data = {
                     'instagram_username': ig_username,
                     'name': lead_info.get('full_name') or username,
                     'source_channel': 'outbound_instagram_dm',
                     'outreach_sent_at': now,
                     'last_outreach_message': message_sent[:500] if message_sent else None,
                     'funnel_stage': 'prospected',
-                    'lead_temperature': 'cold',
+                    'lead_temperature': score_info.get('priority', 'cold'),  # Usar priority do score se disponível
                     'location_id': 'DEFAULT_LOCATION',  # Required field
                     'custom_fields': custom_fields,
                     'created_at': now,
                     'updated_at': now
-                })
-                logger.info(f"✅ Sync: Criado growth_leads para @{username}")
+                }
+                # Adicionar score se disponível
+                if score_info.get('icp_score') is not None:
+                    new_lead_data['icp_score'] = score_info['icp_score']
+
+                self._request("POST", "growth_leads", data=new_lead_data)
+                logger.info(f"✅ Sync: Criado growth_leads para @{username} (score: {score_info.get('icp_score', 'N/A')})")
+
+            # Sync também com GHL API (Bug fix: Prospector agora sincroniza com GHL)
+            self.sync_to_ghl(username, message_sent, lead_data)
 
             return True
 
@@ -411,6 +461,135 @@ class SupabaseDB:
     def sync_to_socialfy_leads(self, username: str, message_sent: str, lead_data: dict = None):
         """Deprecated: Use sync_to_growth_leads instead"""
         return self.sync_to_growth_leads(username, message_sent, lead_data)
+
+    def sync_to_ghl(self, username: str, message_sent: str, lead_data: dict = None) -> bool:
+        """
+        Sincroniza lead prospectado diretamente com GoHighLevel API.
+        Adiciona tag 'prospectado' e atualiza custom fields.
+
+        Args:
+            username: Instagram username do lead
+            message_sent: Mensagem que foi enviada
+            lead_data: Dados adicionais do lead
+
+        Returns:
+            bool: True se sucesso, False se falha
+        """
+        if not GHL_API_KEY:
+            logger.warning("⚠️ GHL_API_KEY não configurada - sync GHL ignorado")
+            return False
+
+        try:
+            ig_username = username.lstrip("@")
+            headers = {
+                "Authorization": f"Bearer {GHL_API_KEY}",
+                "Content-Type": "application/json",
+                "Version": "2021-07-28"
+            }
+
+            # 1. Buscar contato no GHL por instagram_username
+            search_url = f"{GHL_API_URL}/contacts/search"
+            search_params = {
+                "locationId": GHL_LOCATION_ID,
+                "query": ig_username
+            }
+
+            search_response = requests.get(search_url, headers=headers, params=search_params)
+
+            contact_id = None
+            if search_response.status_code == 200:
+                contacts = search_response.json().get("contacts", [])
+                for contact in contacts:
+                    custom = contact.get("customFields", [])
+                    for field in custom:
+                        if field.get("value") == ig_username:
+                            contact_id = contact.get("id")
+                            break
+                    if contact_id:
+                        break
+
+            lead_info = lead_data or {}
+            now = datetime.now().isoformat()
+
+            if contact_id:
+                # 2a. Atualizar contato existente - adicionar tags
+                update_url = f"{GHL_API_URL}/contacts/{contact_id}"
+                update_data = {
+                    "tags": ["prospectado", "outbound-instagram"],
+                    "customFields": [
+                        {"key": "outreach_sent_at", "field_value": now},
+                        {"key": "last_outreach_message", "field_value": message_sent[:500] if message_sent else ""},
+                        {"key": "source_channel", "field_value": "outbound_instagram_dm"}
+                    ]
+                }
+
+                update_response = requests.put(update_url, headers=headers, json=update_data)
+
+                if update_response.status_code in [200, 201]:
+                    logger.info(f"✅ GHL Sync: Atualizado contato {contact_id} para @{username}")
+                    return True
+                else:
+                    logger.warning(f"⚠️ GHL Sync falhou ao atualizar: {update_response.text}")
+                    return False
+            else:
+                # 2b. Criar novo contato no GHL
+                create_url = f"{GHL_API_URL}/contacts"
+                create_data = {
+                    "locationId": GHL_LOCATION_ID,
+                    "name": lead_info.get("full_name") or username,
+                    "tags": ["prospectado", "outbound-instagram", "novo-lead"],
+                    "source": "AgenticOS Prospector",
+                    "customFields": [
+                        {"key": "instagram_username", "field_value": ig_username},
+                        {"key": "outreach_sent_at", "field_value": now},
+                        {"key": "last_outreach_message", "field_value": message_sent[:500] if message_sent else ""},
+                        {"key": "source_channel", "field_value": "outbound_instagram_dm"},
+                        {"key": "instagram_bio", "field_value": (lead_info.get("bio") or "")[:500]},
+                        {"key": "instagram_followers", "field_value": str(lead_info.get("followers_count", ""))}
+                    ]
+                }
+
+                create_response = requests.post(create_url, headers=headers, json=create_data)
+
+                if create_response.status_code in [200, 201]:
+                    new_contact = create_response.json().get("contact", {})
+                    logger.info(f"✅ GHL Sync: Criado contato {new_contact.get('id')} para @{username}")
+                    return True
+                else:
+                    logger.warning(f"⚠️ GHL Sync falhou ao criar: {create_response.text}")
+                    return False
+
+        except Exception as e:
+            logger.warning(f"⚠️ GHL Sync exception para @{username}: {e}")
+            return False
+
+    def update_lead_score(self, lead_id: int, score: int, priority: str) -> bool:
+        """
+        Atualiza o ICP score e priority de um lead no banco.
+        Isso permite ordenar leads por qualidade na próxima execução.
+
+        Args:
+            lead_id: ID do lead na tabela agentic_instagram_leads
+            score: Score calculado (0-100)
+            priority: Prioridade (hot, warm, cold, nurturing)
+
+        Returns:
+            bool: True se sucesso
+        """
+        try:
+            self._request("PATCH", "agentic_instagram_leads",
+                params={"id": f"eq.{lead_id}"},
+                data={
+                    'icp_score': score,
+                    'priority': priority,
+                    'scored_at': datetime.now().isoformat()
+                }
+            )
+            logger.debug(f"📊 Score atualizado: lead {lead_id} = {score} ({priority})")
+            return True
+        except Exception as e:
+            logger.warning(f"⚠️ Falha ao atualizar score do lead {lead_id}: {e}")
+            return False
 
 
 # ============================================
@@ -671,6 +850,9 @@ class InstagramDMAgent:
 
             logger.info(f"   🎯 Score: {score.total_score}/100 | Priority: {score.priority.value.upper()}")
 
+            # 2.1 Persist score to database for future prioritization
+            self.db.update_lead_score(lead.id, score.total_score, score.priority.value)
+
             # 3. Check if should send DM
             if score.priority == LeadPriority.NURTURING:
                 logger.info(f"   ⏭️  Score too low ({score.total_score}), skipping DM")
@@ -808,10 +990,20 @@ class InstagramDMAgent:
                 error=error_msg
             )
 
-    async def run_campaign(self, limit: int = 200, template_id: int = 1):
-        """Run DM campaign"""
+    async def run_campaign(self, limit: int = 200, template_id: int = 1, min_score: int = 0):
+        """
+        Run DM campaign with optional quality filtering.
+
+        Args:
+            limit: Maximum number of leads to process
+            template_id: ID of message template to use (if not smart mode)
+            min_score: Minimum ICP score required (0 = no filter, process all)
+                       Recommended: 40 (skip NURTURING), 50 (only WARM+HOT), 70 (only HOT)
+        """
         logger.info("="*60)
         logger.info("🎯 STARTING DM CAMPAIGN")
+        if min_score > 0:
+            logger.info(f"🎯 Quality Filter: min_score >= {min_score}")
         logger.info("="*60)
 
         # Check rate limits
@@ -823,14 +1015,14 @@ class InstagramDMAgent:
         # Start run tracking
         self.db.start_run(INSTAGRAM_USERNAME)
 
-        # Get leads
-        leads = self.db.get_leads_to_contact(limit=limit)
+        # Get leads with quality filtering and priority sorting
+        leads = self.db.get_leads_to_contact(limit=limit, min_score=min_score, prioritize_scored=True)
         if not leads:
             logger.warning("⚠️  No leads to contact!")
             self.db.end_run(0, 0, 0, status='no_leads')
             return
 
-        logger.info(f"📋 Processing {len(leads)} leads...")
+        logger.info(f"📋 Processing {len(leads)} leads (sorted by priority: HOT > WARM > COLD)...")
 
         try:
             for i, lead in enumerate(leads):
@@ -875,7 +1067,14 @@ class InstagramDMAgent:
                         'is_verified': getattr(profile, 'is_verified', None) if self.smart_mode and profile else None,
                         'is_business_account': getattr(profile, 'is_business_account', None) if self.smart_mode and profile else None
                     }
-                    self.db.sync_to_growth_leads(lead.username, result.message_sent, lead_data)
+                    # Incluir score_data para sincronizar com growth_leads
+                    score_data = None
+                    if self.smart_mode and score:
+                        score_data = {
+                            'icp_score': score.total_score,
+                            'priority': score.priority.value
+                        }
+                    self.db.sync_to_growth_leads(lead.username, result.message_sent, lead_data, score_data)
                 else:
                     self.dms_failed += 1
 
