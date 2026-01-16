@@ -602,9 +602,10 @@ class InstagramDMAgent:
     Now with Smart Mode: Profile Scraping + Semantic Scoring + Personalized Messages
     """
 
-    def __init__(self, headless: bool = False, smart_mode: bool = True):
+    def __init__(self, headless: bool = False, smart_mode: bool = True, tenant_id: str = "DEFAULT"):
         self.headless = headless
         self.smart_mode = smart_mode and SMART_MODE_AVAILABLE
+        self.tenant_id = tenant_id
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
@@ -617,7 +618,7 @@ class InstagramDMAgent:
         # Smart mode components
         if self.smart_mode:
             self.scraper = None  # Initialized after page is ready
-            self.scorer = LeadScorer()
+            self.scorer = LeadScorer(tenant_id=tenant_id)
             self.message_generator = MessageGenerator()
             if VISION_SCRAPER and VISION_MODEL == "gemini":
                 logger.info("🧠 Smart Mode ENABLED: Gemini Vision (FREE)")
