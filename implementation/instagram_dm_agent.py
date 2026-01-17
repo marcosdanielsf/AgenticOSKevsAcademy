@@ -698,14 +698,24 @@ class InstagramDMAgent:
             'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
 
-        # Try to load existing session
-        if SESSION_PATH.exists():
-            logger.info("📂 Loading existing session...")
+        # Try to load session from database first (multi-tenant), then fallback to file
+        session_loaded = False
+        if self.current_account and self.current_account.session_data:
+            logger.info("📂 Loading session from database (multi-tenant)...")
+            try:
+                context_options['storage_state'] = self.current_account.session_data
+                session_loaded = True
+            except Exception as e:
+                logger.warning(f"Could not load session from database: {e}")
+
+        # Fallback to local file if no database session
+        if not session_loaded and SESSION_PATH.exists():
+            logger.info("📂 Loading session from local file...")
             try:
                 storage_state = json.loads(SESSION_PATH.read_text())
                 context_options['storage_state'] = storage_state
             except Exception as e:
-                logger.warning(f"Could not load session: {e}")
+                logger.warning(f"Could not load session from file: {e}")
 
         self.context = await self.browser.new_context(**context_options)
         self.page = await self.context.new_page()
