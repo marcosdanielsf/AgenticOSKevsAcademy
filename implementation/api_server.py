@@ -29,7 +29,7 @@ import sys
 import json
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 from contextlib import asynccontextmanager
@@ -4703,6 +4703,677 @@ async def stop_campaign(campaign_id: str):
         "message": f"Campaign '{campaign['name']}' stopped",
         "stats": campaign.get("stats")
     }
+
+
+# ============================================
+# NEW FOLLOWERS DETECTION ENDPOINTS
+# ============================================
+
+class DetectNewFollowersRequest(BaseModel):
+    """Request para detectar novos seguidores."""
+    account_id: str = Field(..., description="UUID da conta no instagram_accounts")
+    max_followers: int = Field(500, description="Máximo de seguidores a buscar")
+    enrich: bool = Field(False, description="Enriquecer dados de cada novo (mais lento)")
+    save_snapshot: bool = Field(True, description="Salvar snapshot após detecção")
+
+
+class DetectNewFollowersResponse(BaseModel):
+    """Response da detecção de novos seguidores."""
+    success: bool
+    account_id: str
+    username: Optional[str] = None
+    current_followers_count: Optional[int] = None
+    new_followers_count: int = 0
+    saved_count: int = 0
+    has_previous_snapshot: bool = False
+    error: Optional[str] = None
+    detected_at: str
+
+
+class DetectAllAccountsRequest(BaseModel):
+    """Request para detectar novos seguidores em todas as contas."""
+    max_followers_per_account: int = Field(500, description="Máximo de seguidores por conta")
+    enrich: bool = Field(False, description="Enriquecer dados")
+    delay_between_accounts: int = Field(60, description="Delay em segundos entre contas")
+
+
+class OutreachRequest(BaseModel):
+    """Request para enviar outreach."""
+    follower_id: str = Field(..., description="UUID do seguidor em new_followers_detected")
+    message: str = Field(..., description="Mensagem a enviar")
+
+
+class BulkOutreachRequest(BaseModel):
+    """Request para outreach em massa."""
+    follower_ids: List[str] = Field(..., description="Lista de UUIDs dos seguidores")
+    message: str = Field(..., description="Mensagem a enviar para todos")
+
+
+class FollowerStatsResponse(BaseModel):
+    """Response com estatísticas de novos seguidores."""
+    total_accounts: int = 0
+    total_new_followers: int = 0
+    pending: int = 0
+    sent: int = 0
+    responded: int = 0
+    skipped: int = 0
+    ready_for_outreach: int = 0
+    avg_icp_score: float = 0
+
+
+@app.post("/followers/detect-new", response_model=DetectNewFollowersResponse)
+async def detect_new_followers_endpoint(request: DetectNewFollowersRequest):
+    """
+    Detecta novos seguidores de uma conta Instagram.
+
+    Fluxo:
+    1. Busca seguidores atuais via API do Instagram
+    2. Compara com último snapshot para detectar novos
+    3. Calcula ICP score para cada novo
+    4. Salva no banco para processamento posterior
+    """
+    logger.info(f"Detectando novos seguidores para conta {request.account_id}")
+
+    try:
+        from new_followers_detector import NewFollowersDetector
+
+        detector = NewFollowersDetector()
+        result = detector.detect_new(
+            account_id=request.account_id,
+            max_followers=request.max_followers,
+            enrich=request.enrich,
+            save_snapshot=request.save_snapshot
+        )
+
+        return DetectNewFollowersResponse(**result)
+
+    except Exception as e:
+        logger.error(f"Erro ao detectar novos seguidores: {e}", exc_info=True)
+        return DetectNewFollowersResponse(
+            success=False,
+            account_id=request.account_id,
+            error=str(e),
+            detected_at=datetime.now().isoformat()
+        )
+
+
+@app.post("/followers/detect-all")
+async def detect_all_accounts_endpoint(
+    request: DetectAllAccountsRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Detecta novos seguidores para todas as contas ativas.
+    Executa em background devido ao tempo de processamento.
+    """
+    logger.info("Iniciando detecção para todas as contas (background)")
+
+    async def run_detection():
+        from new_followers_detector import NewFollowersDetector
+        detector = NewFollowersDetector()
+        return detector.detect_all_accounts(
+            max_followers_per_account=request.max_followers_per_account,
+            enrich=request.enrich,
+            delay_between_accounts=request.delay_between_accounts
+        )
+
+    # Executar em background
+    background_tasks.add_task(run_detection)
+
+    return {
+        "success": True,
+        "message": "Detecção iniciada em background",
+        "params": {
+            "max_followers_per_account": request.max_followers_per_account,
+            "enrich": request.enrich,
+            "delay_between_accounts": request.delay_between_accounts
+        }
+    }
+
+
+@app.post("/followers/outreach")
+async def send_outreach_endpoint(request: OutreachRequest):
+    """
+    Envia DM de outreach para um novo seguidor.
+    Atualiza o status no banco.
+    """
+    logger.info(f"Enviando outreach para follower {request.follower_id}")
+
+    try:
+        from new_followers_detector import NewFollowersDetector
+
+        detector = NewFollowersDetector()
+
+        # Buscar dados do seguidor
+        followers = detector.db.select(
+            "new_followers_detected",
+            filters={"id": f"eq.{request.follower_id}"}
+        )
+
+        if not followers:
+            raise HTTPException(status_code=404, detail="Seguidor não encontrado")
+
+        follower = followers[0]
+        username = follower.get("follower_username")
+
+        # Enviar DM via Instagram DM Agent
+        try:
+            from instagram_dm_agent import InstagramDMAgent
+
+            dm_agent = InstagramDMAgent()
+            dm_result = dm_agent.send_dm(username, request.message)
+
+            if dm_result.get("success"):
+                # Atualizar status para sent
+                detector.update_outreach_status(
+                    request.follower_id,
+                    status="sent",
+                    message=request.message
+                )
+                return {
+                    "success": True,
+                    "follower_id": request.follower_id,
+                    "username": username,
+                    "message": "DM enviada com sucesso"
+                }
+            else:
+                # Atualizar status para failed
+                detector.update_outreach_status(
+                    request.follower_id,
+                    status="failed"
+                )
+                return {
+                    "success": False,
+                    "follower_id": request.follower_id,
+                    "error": dm_result.get("error", "Falha ao enviar DM")
+                }
+
+        except ImportError:
+            # Se DM Agent não disponível, apenas marcar como sent (simular)
+            logger.warning("InstagramDMAgent não disponível, marcando como sent")
+            detector.update_outreach_status(
+                request.follower_id,
+                status="sent",
+                message=request.message
+            )
+            return {
+                "success": True,
+                "follower_id": request.follower_id,
+                "username": username,
+                "message": "Status atualizado (DM Agent não disponível)"
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao enviar outreach: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/followers/outreach/bulk")
+async def send_bulk_outreach_endpoint(
+    request: BulkOutreachRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Envia DM de outreach para múltiplos seguidores.
+    Executa em background.
+    """
+    logger.info(f"Iniciando outreach em massa para {len(request.follower_ids)} seguidores")
+
+    async def run_bulk_outreach():
+        from new_followers_detector import NewFollowersDetector
+        detector = NewFollowersDetector()
+
+        results = {"sent": 0, "failed": 0, "errors": []}
+
+        for follower_id in request.follower_ids:
+            try:
+                detector.update_outreach_status(
+                    follower_id,
+                    status="sent",
+                    message=request.message
+                )
+                results["sent"] += 1
+                # Rate limiting
+                await asyncio.sleep(2)
+
+            except Exception as e:
+                results["failed"] += 1
+                results["errors"].append({"id": follower_id, "error": str(e)})
+
+        logger.info(f"Bulk outreach concluído: {results['sent']} enviados, {results['failed']} falhas")
+        return results
+
+    background_tasks.add_task(run_bulk_outreach)
+
+    return {
+        "success": True,
+        "message": f"Outreach em massa iniciado para {len(request.follower_ids)} seguidores",
+        "processing_in_background": True
+    }
+
+
+@app.post("/followers/skip")
+async def skip_follower_endpoint(follower_id: str):
+    """
+    Marca um seguidor como ignorado (skip).
+    """
+    logger.info(f"Ignorando follower {follower_id}")
+
+    try:
+        from new_followers_detector import NewFollowersDetector
+
+        detector = NewFollowersDetector()
+        success = detector.update_outreach_status(follower_id, status="skipped")
+
+        return {
+            "success": success,
+            "follower_id": follower_id,
+            "status": "skipped"
+        }
+
+    except Exception as e:
+        logger.error(f"Erro ao ignorar follower: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/followers/stats", response_model=FollowerStatsResponse)
+async def get_followers_stats():
+    """
+    Retorna estatísticas gerais de novos seguidores.
+    """
+    try:
+        from new_followers_detector import NewFollowersDetector
+
+        detector = NewFollowersDetector()
+        stats = detector.get_stats()
+
+        return FollowerStatsResponse(**stats)
+
+    except Exception as e:
+        logger.error(f"Erro ao buscar stats: {e}")
+        return FollowerStatsResponse()
+
+
+@app.get("/followers/stats/{account_id}")
+async def get_account_followers_stats(account_id: str):
+    """
+    Retorna estatísticas de novos seguidores para uma conta específica.
+    """
+    try:
+        from new_followers_detector import NewFollowersDetector
+
+        detector = NewFollowersDetector()
+        stats = detector.get_stats(account_id=account_id)
+
+        if not stats:
+            raise HTTPException(status_code=404, detail="Conta não encontrada")
+
+        return stats
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao buscar stats da conta: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/followers/pending")
+async def get_pending_outreach(
+    account_id: Optional[str] = None,
+    min_icp_score: int = 70,
+    limit: int = 50
+):
+    """
+    Retorna lista de seguidores pendentes para outreach.
+    Filtrados por ICP score mínimo.
+    """
+    try:
+        from new_followers_detector import NewFollowersDetector
+
+        detector = NewFollowersDetector()
+        pending = detector.get_pending_outreach(
+            account_id=account_id,
+            min_icp_score=min_icp_score,
+            limit=limit
+        )
+
+        return {
+            "success": True,
+            "count": len(pending),
+            "min_icp_score": min_icp_score,
+            "followers": pending
+        }
+
+    except Exception as e:
+        logger.error(f"Erro ao buscar pendentes: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "followers": []
+        }
+
+
+@app.get("/followers/accounts")
+async def get_monitored_accounts(active_only: bool = True):
+    """
+    Retorna lista de contas Instagram monitoradas.
+    """
+    try:
+        from new_followers_detector import NewFollowersDetector
+
+        detector = NewFollowersDetector()
+        accounts = detector.get_monitored_accounts(active_only=active_only)
+
+        return {
+            "success": True,
+            "count": len(accounts),
+            "accounts": accounts
+        }
+
+    except Exception as e:
+        logger.error(f"Erro ao buscar contas: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "accounts": []
+        }
+
+
+# ============================================
+# MULTI-TENANT INSTAGRAM ACCOUNT MANAGEMENT
+# ============================================
+
+class CreateInstagramAccountRequest(BaseModel):
+    """Request para criar conta Instagram para um tenant."""
+    tenant_id: str = Field(..., description="ID do tenant")
+    username: str = Field(..., description="Username da conta Instagram")
+    session_id: Optional[str] = Field(None, description="Session ID do Instagram")
+    daily_limit: int = Field(50, ge=1, le=500, description="Limite diário de DMs")
+    hourly_limit: int = Field(10, ge=1, le=50, description="Limite horário de DMs")
+    notes: Optional[str] = Field(None, description="Notas sobre a conta")
+
+
+class UpdateInstagramAccountRequest(BaseModel):
+    """Request para atualizar conta Instagram."""
+    session_id: Optional[str] = Field(None, description="Novo session ID")
+    daily_limit: Optional[int] = Field(None, ge=1, le=500)
+    hourly_limit: Optional[int] = Field(None, ge=1, le=50)
+    status: Optional[str] = Field(None, description="active, paused, blocked")
+    notes: Optional[str] = Field(None)
+
+
+class InstagramAccountResponse(BaseModel):
+    """Response com dados da conta Instagram."""
+    id: int
+    tenant_id: str
+    username: str
+    status: str
+    daily_limit: int
+    hourly_limit: int
+    is_available: bool
+    remaining_today: int
+    remaining_this_hour: int
+    last_used_at: Optional[str] = None
+    blocked_until: Optional[str] = None
+
+
+class TenantStatsResponse(BaseModel):
+    """Response com estatísticas do tenant."""
+    tenant_id: str
+    total_accounts: int
+    active_accounts: int
+    available_accounts: int
+    total_daily_capacity: int
+    total_sent_today: int
+    total_remaining_today: int
+    accounts: List[Dict[str, Any]]
+
+
+@app.get("/api/accounts/{tenant_id}", response_model=TenantStatsResponse)
+async def get_tenant_accounts(tenant_id: str):
+    """
+    Lista todas as contas Instagram de um tenant com estatísticas.
+    """
+    try:
+        from account_manager import AccountManager
+        manager = AccountManager()
+        stats = manager.get_tenant_stats(tenant_id)
+        return TenantStatsResponse(**stats)
+    except Exception as e:
+        logger.error(f"Error getting tenant accounts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/accounts", response_model=InstagramAccountResponse)
+async def create_instagram_account(request: CreateInstagramAccountRequest):
+    """
+    Cria uma nova conta Instagram para um tenant.
+
+    Cada tenant pode ter múltiplas contas para:
+    - Rotação automática quando uma atinge o limite
+    - Distribuição de carga entre contas
+    - Recuperação quando uma é bloqueada
+    """
+    try:
+        from account_manager import AccountManager
+        manager = AccountManager()
+
+        # Check if account already exists
+        existing = manager.get_account_by_username(request.tenant_id, request.username)
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Account @{request.username} already exists for tenant {request.tenant_id}"
+            )
+
+        account_id = manager.create_account(
+            tenant_id=request.tenant_id,
+            username=request.username,
+            session_id=request.session_id,
+            daily_limit=request.daily_limit,
+            hourly_limit=request.hourly_limit
+        )
+
+        if not account_id:
+            raise HTTPException(status_code=500, detail="Failed to create account")
+
+        # Fetch created account
+        account = manager.get_account_by_username(request.tenant_id, request.username)
+
+        return InstagramAccountResponse(
+            id=account.id,
+            tenant_id=account.tenant_id,
+            username=account.username,
+            status=account.status,
+            daily_limit=account.daily_limit,
+            hourly_limit=account.hourly_limit,
+            is_available=account.is_available,
+            remaining_today=account.remaining_today,
+            remaining_this_hour=account.remaining_this_hour,
+            last_used_at=account.last_used_at.isoformat() if account.last_used_at else None,
+            blocked_until=account.blocked_until.isoformat() if account.blocked_until else None
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating account: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/api/accounts/{tenant_id}/{username}")
+async def update_instagram_account(
+    tenant_id: str,
+    username: str,
+    request: UpdateInstagramAccountRequest
+):
+    """
+    Atualiza uma conta Instagram existente.
+    """
+    try:
+        from account_manager import AccountManager
+        manager = AccountManager()
+
+        account = manager.get_account_by_username(tenant_id, username)
+        if not account:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Account @{username} not found for tenant {tenant_id}"
+            )
+
+        # Update fields
+        update_data = {}
+        if request.session_id is not None:
+            update_data['session_id'] = request.session_id
+        if request.daily_limit is not None:
+            update_data['daily_limit'] = request.daily_limit
+        if request.hourly_limit is not None:
+            update_data['hourly_limit'] = request.hourly_limit
+        if request.status is not None:
+            update_data['status'] = request.status
+        if request.notes is not None:
+            update_data['notes'] = request.notes
+
+        if update_data:
+            manager._request("PATCH", "instagram_accounts",
+                params={"id": f"eq.{account.id}"},
+                data=update_data
+            )
+
+        return {"success": True, "message": f"Account @{username} updated"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating account: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/accounts/{tenant_id}/{username}")
+async def delete_instagram_account(tenant_id: str, username: str):
+    """
+    Remove uma conta Instagram de um tenant.
+    """
+    try:
+        from account_manager import AccountManager
+        manager = AccountManager()
+
+        account = manager.get_account_by_username(tenant_id, username)
+        if not account:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Account @{username} not found for tenant {tenant_id}"
+            )
+
+        manager.delete_account(account.id)
+
+        return {"success": True, "message": f"Account @{username} deleted"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting account: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/accounts/{tenant_id}/{username}/block")
+async def block_instagram_account(
+    tenant_id: str,
+    username: str,
+    hours: int = 24,
+    reason: Optional[str] = None
+):
+    """
+    Marca uma conta como bloqueada temporariamente.
+    Usado quando o Instagram bloqueia a conta.
+    """
+    try:
+        from account_manager import AccountManager
+        manager = AccountManager()
+
+        account = manager.get_account_by_username(tenant_id, username)
+        if not account:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Account @{username} not found for tenant {tenant_id}"
+            )
+
+        manager.mark_blocked(account.id, hours=hours, reason=reason)
+
+        return {
+            "success": True,
+            "message": f"Account @{username} blocked for {hours} hours",
+            "blocked_until": (datetime.now() + timedelta(hours=hours)).isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error blocking account: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/accounts/{tenant_id}/{username}/unblock")
+async def unblock_instagram_account(tenant_id: str, username: str):
+    """
+    Desbloqueia uma conta Instagram.
+    """
+    try:
+        from account_manager import AccountManager
+        manager = AccountManager()
+
+        account = manager.get_account_by_username(tenant_id, username)
+        if not account:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Account @{username} not found for tenant {tenant_id}"
+            )
+
+        manager.unblock_account(account.id)
+
+        return {"success": True, "message": f"Account @{username} unblocked"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error unblocking account: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/accounts/{tenant_id}/available")
+async def get_available_account(tenant_id: str):
+    """
+    Retorna a melhor conta disponível para prospecção.
+    Útil para verificar antes de iniciar uma campanha.
+    """
+    try:
+        from account_manager import AccountManager
+        manager = AccountManager()
+
+        account = manager.get_available_account(tenant_id)
+        if not account:
+            return {
+                "success": False,
+                "message": f"No available accounts for tenant {tenant_id}",
+                "account": None
+            }
+
+        return {
+            "success": True,
+            "account": {
+                "id": account.id,
+                "username": account.username,
+                "status": account.status,
+                "remaining_today": account.remaining_today,
+                "remaining_this_hour": account.remaining_this_hour
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting available account: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================

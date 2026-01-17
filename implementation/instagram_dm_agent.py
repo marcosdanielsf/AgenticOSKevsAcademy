@@ -52,6 +52,14 @@ except ImportError:
         VISION_SCRAPER = False
         VISION_MODEL = "none"
 
+# Import multi-tenant account manager
+try:
+    from account_manager import AccountManager, InstagramAccount, get_default_account
+    MULTI_TENANT_AVAILABLE = True
+except ImportError:
+    MULTI_TENANT_AVAILABLE = False
+    logger.warning("AccountManager not available - using single account mode")
+
 # Load environment
 load_dotenv()
 
@@ -182,9 +190,9 @@ We're helping businesses automate their Instagram outreach with AI. Personalized
 # ============================================
 
 class SupabaseDB:
-    """Supabase database operations using REST API"""
+    """Supabase database operations using REST API with multi-tenant support"""
 
-    def __init__(self):
+    def __init__(self, tenant_id: str = None):
         self.base_url = f"{SUPABASE_URL}/rest/v1"
         self.headers = {
             "apikey": SUPABASE_KEY,
@@ -193,6 +201,7 @@ class SupabaseDB:
             "Prefer": "return=representation"
         }
         self.run_id: Optional[int] = None
+        self.tenant_id: Optional[str] = tenant_id
 
     def _request(self, method: str, endpoint: str, params: dict = None, data: dict = None):
         """Make request to Supabase REST API"""
@@ -208,14 +217,19 @@ class SupabaseDB:
         response.raise_for_status()
         return response.json() if response.text else []
 
-    def start_run(self, account: str) -> int:
+    def start_run(self, account: str, tenant_id: str = None) -> int:
         """Start a new agent run and return run ID"""
-        result = self._request("POST", "agentic_instagram_dm_runs", data={
+        data = {
             'account_used': account,
             'status': 'running'
-        })
+        }
+        # Include tenant_id if provided (multi-tenant support)
+        if tenant_id:
+            data['tenant_id'] = tenant_id
+
+        result = self._request("POST", "agentic_instagram_dm_runs", data=data)
         self.run_id = result[0]['id'] if result else None
-        logger.info(f"Started run #{self.run_id}")
+        logger.info(f"Started run #{self.run_id} for tenant {tenant_id or 'default'}")
         return self.run_id
 
     def end_run(self, dms_sent: int, dms_failed: int, dms_skipped: int, status: str = 'completed', error_log: str = None):
@@ -609,11 +623,15 @@ class InstagramDMAgent:
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
-        self.db = SupabaseDB()
+        self.db = SupabaseDB(tenant_id=tenant_id)
         self.results: List[DMResult] = []
         self.dms_sent = 0
         self.dms_failed = 0
         self.dms_skipped = 0
+
+        # Multi-tenant account management
+        self.account_manager = AccountManager() if MULTI_TENANT_AVAILABLE else None
+        self.current_account: Optional[InstagramAccount] = None
 
         # Smart mode components
         if self.smart_mode:
@@ -630,8 +648,38 @@ class InstagramDMAgent:
     async def start(self):
         """Initialize browser and load session"""
         logger.info("🚀 Starting Instagram DM Agent...")
-        logger.info(f"   Account: @{INSTAGRAM_USERNAME}")
+
+        # Get account for tenant (multi-tenant support)
+        if self.account_manager:
+            self.current_account = self.account_manager.get_available_account(self.tenant_id)
+            if not self.current_account:
+                # Fallback to default account from env vars
+                self.current_account = get_default_account()
+
+        if not self.current_account:
+            # Last resort: use env vars directly
+            if INSTAGRAM_USERNAME:
+                logger.warning(f"Using env var fallback for account @{INSTAGRAM_USERNAME}")
+                self.current_account = InstagramAccount(
+                    id=0,
+                    tenant_id=self.tenant_id,
+                    username=INSTAGRAM_USERNAME,
+                    session_id=os.getenv("INSTAGRAM_SESSION_ID"),
+                    session_data=None,
+                    status="active",
+                    daily_limit=MAX_DMS_PER_DAY,
+                    hourly_limit=MAX_DMS_PER_HOUR,
+                    last_used_at=None,
+                    blocked_until=None
+                )
+            else:
+                raise ValueError(f"No Instagram account available for tenant '{self.tenant_id}'. "
+                               "Add account to instagram_accounts table or set INSTAGRAM_USERNAME env var.")
+
+        logger.info(f"   Account: @{self.current_account.username}")
+        logger.info(f"   Tenant: {self.tenant_id}")
         logger.info(f"   Headless: {self.headless}")
+        logger.info(f"   Remaining today: {self.current_account.remaining_today}")
 
         playwright = await async_playwright().start()
 
@@ -1013,8 +1061,9 @@ class InstagramDMAgent:
             logger.warning(f"⚠️  {reason}")
             return
 
-        # Start run tracking
-        self.db.start_run(INSTAGRAM_USERNAME)
+        # Start run tracking (using current tenant account)
+        account_username = self.current_account.username if self.current_account else INSTAGRAM_USERNAME
+        self.db.start_run(account_username, self.tenant_id)
 
         # Get leads with quality filtering and priority sorting
         leads = self.db.get_leads_to_contact(limit=limit, min_score=min_score, prioritize_scored=True)
