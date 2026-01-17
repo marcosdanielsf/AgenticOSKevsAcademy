@@ -4498,12 +4498,16 @@ async def run_health_check(background_tasks: BackgroundTasks):
 class StartCampaignRequest(BaseModel):
     """Request para iniciar campanha de prospecção."""
     name: str = Field(..., description="Nome da campanha")
-    target_type: str = Field(..., description="Tipo de target: hashtag, profile, or leads")
-    target_value: str = Field(..., description="Valor do target (hashtag sem #, username, ou 'all')")
+    target_type: str = Field(..., description="Tipo de target: hashtag, profile, profiles (plural), or leads")
+    target_value: str = Field(..., description="Valor do target (hashtag sem #, username, lista de usernames separados por vírgula, ou 'all')")
     limit: int = Field(default=50, ge=1, le=500, description="Número máximo de leads")
     min_score: int = Field(default=0, ge=0, le=100, description="Score mínimo para enviar DM (0=todos)")
     template_id: int = Field(default=1, ge=1, description="ID do template de mensagem")
     tenant_id: Optional[str] = Field(default="DEFAULT", description="ID do tenant")
+    # MÉTODO KEVS - Novos parâmetros
+    kevs_mode: bool = Field(default=False, description="Usar Método Kevs Anti-Block (round-robin + delay)")
+    delay_min: float = Field(default=3.0, ge=1.0, le=30.0, description="Delay mínimo entre DMs em MINUTOS")
+    delay_max: float = Field(default=7.0, ge=1.0, le=60.0, description="Delay máximo entre DMs em MINUTOS")
 
 class CampaignStatusResponse(BaseModel):
     """Response com status da campanha."""
@@ -4543,6 +4547,8 @@ async def start_campaign(
     logger.info(f"🚀 Starting campaign {campaign_id}: {request.name}")
     logger.info(f"   Target: {request.target_type}={request.target_value}")
     logger.info(f"   Limit: {request.limit}, Min Score: {request.min_score}")
+    if request.kevs_mode:
+        logger.info(f"   🔄 MÉTODO KEVS: Round-Robin + Delay {request.delay_min}-{request.delay_max}min")
 
     # Initialize campaign tracking
     running_campaigns[campaign_id] = {
@@ -4554,6 +4560,9 @@ async def start_campaign(
         "limit": request.limit,
         "min_score": request.min_score,
         "tenant_id": request.tenant_id,
+        "kevs_mode": request.kevs_mode,
+        "delay_min": request.delay_min,
+        "delay_max": request.delay_max,
         "started_at": datetime.now().isoformat(),
         "stats": {
             "leads_scraped": 0,
@@ -4591,8 +4600,38 @@ async def start_campaign(
                 except Exception as e:
                     logger.warning(f"Followers scrape failed: {e}. Using existing leads.")
 
+            elif request.target_type == "profiles":
+                # MÉTODO KEVS: Múltiplos perfis separados por vírgula
+                profiles = [p.strip() for p in request.target_value.split(",") if p.strip()]
+                logger.info(f"👥 Scraping followers from {len(profiles)} profiles: {profiles}")
+
+                total_scraped = 0
+                limit_per_profile = request.limit // len(profiles) if profiles else request.limit
+
+                try:
+                    from instagram_dm_agent import InstagramDMAgent
+                    agent = InstagramDMAgent()
+
+                    for profile in profiles:
+                        logger.info(f"   📍 Scraping @{profile} (limit: {limit_per_profile})...")
+                        try:
+                            scrape_result = agent.scrape_followers(profile, limit=limit_per_profile)
+                            scraped_count = scrape_result.get("count", 0)
+                            total_scraped += scraped_count
+                            logger.info(f"   ✅ @{profile}: {scraped_count} leads")
+                        except Exception as e:
+                            logger.warning(f"   ⚠️ @{profile} falhou: {e}")
+
+                    running_campaigns[campaign_id]["stats"]["leads_scraped"] = total_scraped
+                    logger.info(f"📊 Total scraped de {len(profiles)} perfis: {total_scraped} leads")
+                except Exception as e:
+                    logger.warning(f"Multi-profile scrape failed: {e}. Using existing leads.")
+
             # Step 2: Run DM campaign
-            logger.info(f"📨 Starting DM campaign with min_score={request.min_score}...")
+            if request.kevs_mode:
+                logger.info(f"📨 Starting KEVS campaign (Round-Robin + Delay {request.delay_min}-{request.delay_max}min)...")
+            else:
+                logger.info(f"📨 Starting DM campaign with min_score={request.min_score}...")
 
             try:
                 from instagram_dm_agent import InstagramDMAgent
@@ -4601,11 +4640,23 @@ async def start_campaign(
                 # CRITICAL: Initialize agent and load account from database
                 await agent.start()
 
-                await agent.run_campaign(
-                    limit=request.limit,
-                    template_id=request.template_id,
-                    min_score=request.min_score
-                )
+                # Escolher método de campanha
+                if request.kevs_mode:
+                    # MÉTODO KEVS: Round-Robin + Delay em minutos
+                    await agent.run_campaign_kevs(
+                        limit=request.limit,
+                        template_id=request.template_id,
+                        min_score=request.min_score,
+                        delay_min_minutes=request.delay_min,
+                        delay_max_minutes=request.delay_max
+                    )
+                else:
+                    # Método tradicional
+                    await agent.run_campaign(
+                        limit=request.limit,
+                        template_id=request.template_id,
+                        min_score=request.min_score
+                    )
 
                 # Update stats
                 running_campaigns[campaign_id]["stats"]["dms_sent"] = agent.dms_sent

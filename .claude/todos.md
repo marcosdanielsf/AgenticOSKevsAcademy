@@ -1,103 +1,134 @@
 # AgenticOS - Lista de Tarefas
 
-> **Atualizado em:** 2026-01-16
-> **Leia este arquivo após reset de memória para saber onde parou**
+> **Atualizado em:** 2026-01-17 (09:30)
+> **Status:** DMs funcionando, templates Charlie Morgan implementados
+> **Leia este arquivo apos reset de memoria para saber onde parou**
 
 ---
 
 ## Legenda
 
 - [ ] Pendente
-- [x] Concluído
+- [x] Concluido
 - [~] Em progresso
 
 ---
 
-## Fase Atual: Integração Socialfy
+## Sessão 2026-01-17 - CONCLUÍDO
 
-### Concluídas (2026-01-16)
+### Bugs Corrigidos
+- [x] Corrigir `agent.start()` não chamado antes de `run_campaign()` (api_server.py)
+- [x] Adicionar Pillow ao requirements.txt (Gemini Vision)
+- [x] Implementar carregamento de sessão do banco Supabase
+- [x] Atualizar sessão no banco via script `/tmp/claude/update_session.py`
+- [x] Deploy no Railway com código novo
+- [x] Testar campanha - **1 DM enviado com sucesso!**
 
-- [x] Criar tabela `tenant_icp_config` no Supabase
-- [x] Implementar scoring multi-tenant em `lead_scorer.py`
-- [x] Adicionar `tenant_id` no `instagram_dm_agent.py`
-- [x] Criar método `sync_to_ghl()` para sincronizar com GHL
-- [x] Adicionar colunas de scoring na tabela `agentic_instagram_leads`
-- [x] Deploy no Railway (funcionando)
-- [x] Testar scoring com tenant DEFAULT
-- [x] Testar scoring com tenant `startup_abc`
-- [x] Criar sistema de memória estendida (.claude/)
-
-### Próximas Tarefas
-
-- [x] **Integrar Socialfy com Supabase real** ✅ (2026-01-16)
-  - [x] Configurar variáveis de ambiente no Socialfy
-  - [x] Criar hook `useLeads` no Socialfy
-  - [x] Criar view de leads com filtro por prioridade
-  - [x] Adicionar badges HOT/WARM/COLD nos cards
-
-- [x] **Pipeline de Prospecção** ✅ (2026-01-16)
-  - [x] Criar endpoint `/api/campaign/start` no AgenticOS
-  - [x] Criar hook `useCampaigns` no Socialfy
-  - [x] Criar modal "New Campaign" com formulário completo
-  - [x] Integrar botões Start/Stop com API
-
-- [ ] **Melhorias Futuras**
-  - [ ] Adicionar logs em tempo real via WebSocket
-  - [ ] Remover mock data do `useSupabaseData.ts`
-  - [ ] Implementar persistência de campanhas no Supabase
+### Templates Charlie Morgan
+- [x] Reescrever templates para estilo curto/vago/curioso
+- [x] Implementar extração de especialidades da bio
+- [x] Adicionar novos hooks por profissão
+- [x] Commit: `feat: rewrite message templates to Charlie Morgan style`
+- [ ] **Git Push pendente** (problema de conexão)
 
 ---
 
-## Backlog (Futuro)
+## Sessão 2026-01-17 (Continuação) - MÉTODO KEVS IMPLEMENTADO
 
-- [ ] Implementar autenticação no Socialfy (Supabase Auth)
-- [ ] Criar página de configuração de ICP por tenant
-- [ ] Dashboard de analytics com Recharts
-- [ ] Integrar com LinkedIn (scraping)
-- [ ] Testes E2E com Playwright
-- [ ] Atualizar Next.js para versão segura (>14.0.4)
+### ✅ Concluído: Prospecção Multi-Conta
+
+- [x] **Suporte a múltiplos perfis de origem**
+  - [x] Adicionar `target_type: "profiles"` (plural)
+  - [x] Aceitar lista separada por vírgula
+  - [x] Scrape followers de cada perfil
+
+- [x] **Rotação Round-Robin entre contas**
+  - [x] Implementar `RoundRobinAccountRotator` em `account_manager.py`
+  - [x] Alternância A→B→C→A→B→C (não esgota uma conta antes)
+  - [x] Pular conta se bloqueada automaticamente
+
+- [x] **Delay Aleatório entre DMs (Método Kevs)**
+  - [x] Adicionar parâmetros `delay_min` e `delay_max` em MINUTOS
+  - [x] Jitter humano (±15% de variação)
+  - [x] Novo método `run_campaign_kevs()` em `instagram_dm_agent.py`
+
+### Fluxo Implementado:
+```
+08:00 → Conta A: DM1
+08:05 → Conta B: DM2  (delay ~5 min)
+08:11 → Conta C: DM3  (delay ~6 min)
+08:17 → Conta A: DM4  ← volta pro início
+...
+```
+
+### Parâmetros da Campanha Kevs:
+```json
+{
+  "tenant_id": "mottivme",
+  "target_type": "profiles",
+  "target_value": "dr_joao,dra_maria,clinica_xyz",
+  "limit": 150,
+  "kevs_mode": true,
+  "delay_min": 3,
+  "delay_max": 7
+}
+```
+
+## PRÓXIMA SESSÃO - Teste e Refinamento
 
 ---
 
-## Bugs Conhecidos
+## Backlog - Escalabilidade
 
-| Bug | Status | Arquivo |
-|-----|--------|---------|
-| Terminal quebrando comandos multi-linha | Workaround: usar arquivos .py | N/A |
+### FASE 1 - URGENTE
+- [ ] Redis para campanhas e rate limiting
+- [ ] Connection pooling (httpx)
+- [ ] Retry logic (tenacity)
+
+### FASE 2 - IMPORTANTE
+- [ ] Celery + Job Queue
+- [ ] Checkpoint system para campanhas
+- [ ] JWT auth + RBAC
+
+### FASE 3 - OBSERVABILIDADE
+- [ ] Sentry para erros
+- [ ] Prometheus metrics
+- [ ] Structured logging
 
 ---
 
-## Arquivos Modificados Recentemente
+## Arquivos Modificados (2026-01-17)
 
-| Arquivo | Última Modificação | Descrição |
-|---------|-------------------|-----------|
-| `implementation/api_server.py` | 2026-01-16 | Endpoints /api/campaign/* |
-| `socialfy-platform/hooks/useCampaigns.ts` | 2026-01-16 | Hook de campanhas |
-| `socialfy-platform/views/CampaignsView.tsx` | 2026-01-16 | Modal nova campanha |
-| `implementation/lead_scorer.py` | 2026-01-16 | Scoring multi-tenant |
-| `implementation/instagram_dm_agent.py` | 2026-01-16 | tenant_id + sync_to_ghl |
+| Arquivo | Mudança |
+|---------|---------|
+| `implementation/api_server.py` | Adicionado `agent.start()` antes de `run_campaign()` |
+| `implementation/instagram_dm_agent.py` | Carregamento de sessão do banco Supabase |
+| `implementation/message_generator.py` | Templates Charlie Morgan |
+| `requirements.txt` | Adicionado Pillow>=10.0.0 |
 
 ---
 
-## Notas de Sessão
+## Scripts Úteis
 
-**2026-01-16 (Noite):**
-- ✅ Pipeline de Prospecção COMPLETO
-- Arquivos criados/modificados:
-  - `implementation/api_server.py`: Endpoints /api/campaign/start, /api/campaign/{id}, /api/campaigns, /api/campaign/{id}/stop
-  - `socialfy-platform/hooks/useCampaigns.ts`: Hook completo com polling
-  - `socialfy-platform/components/views/CampaignsView.tsx`: Modal de nova campanha, status badges, start/stop
+```bash
+# Testar campanha
+bash /tmp/claude/test_campaign.sh
 
-**2026-01-16 (Tarde):**
-- ✅ Integração Socialfy + Supabase COMPLETA
-- ✅ Sistema de agentes especializados configurado
-- ✅ Code review feito com 4 bugs críticos corrigidos
-- Arquivos criados no Socialfy:
-  - hooks/useLeads.ts, useTenants.ts, index.ts
-  - components/leads/LeadCard.tsx, LeadFilters.tsx, PriorityBadge.tsx
-  - components/views/LeadsView.tsx (reescrito)
+# Verificar status
+bash /tmp/claude/check_status.sh
 
-**2026-01-16 (Manhã):**
-- Scoring funcionando com dois tenants (DEFAULT, startup_abc)
-- Mesmo lead: DEFAULT=45/COLD, startup_abc=55/WARM (provando multi-tenant)
-- Frontend AgenticOS rodando em localhost:3001
+# Atualizar sessão no banco
+python /tmp/claude/update_session.py
+
+# Push pendente
+git push origin main
+```
+
+---
+
+## Como Retomar
+
+1. Ler `.claude/context.md` e `.claude/todos.md`
+2. Fazer `git push origin main` (commit Charlie Morgan pendente)
+3. Implementar rotação round-robin + delay (método Kevs)
+4. Testar com múltiplas contas

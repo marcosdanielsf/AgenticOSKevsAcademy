@@ -1,6 +1,6 @@
 # AgenticOS - Contexto do Projeto
 
-> **Atualizado em:** 2026-01-16
+> **Atualizado em:** 2026-01-17
 > **Leia este arquivo primeiro após qualquer reset de memória**
 
 ---
@@ -8,6 +8,33 @@
 ## Objetivo Principal
 
 Sistema de **prospecção automatizada B2B** com IA para a MOTTIVME. Faz scraping de leads no Instagram, qualifica com ICP scoring por tenant, envia DMs personalizadas e sincroniza com GHL (GoHighLevel).
+
+---
+
+## ÚLTIMA SESSÃO (2026-01-17) - RESUMO EXECUTIVO
+
+### ✅ Problemas Resolvidos
+1. **Erro 400 em campanhas** - `agent.start()` não era chamado antes de `run_campaign()`
+2. **PIL/Pillow warning** - Adicionado ao requirements.txt
+3. **Sessão não carregava no Railway** - Implementado carregamento de sessão do banco Supabase
+4. **DMs funcionando** - Campanha enviou 1 DM com sucesso, 1 skipped (score baixo)
+
+### ✅ Templates Charlie Morgan Implementados
+- Mensagens **curtas, vagas, curiosas**
+- Baseadas na **bio do lead**
+- Sem pitch direto (gera curiosidade primeiro)
+- Arquivo: `implementation/message_generator.py`
+
+### ✅ Método Kevs Anti-Block Implementado (2026-01-17)
+1. **`RoundRobinAccountRotator`** - Classe para rotação round-robin entre contas
+2. **`run_campaign_kevs()`** - Método com delay em MINUTOS e rotação
+3. **`target_type: "profiles"`** - Suporte a múltiplos perfis separados por vírgula
+4. **Jitter humano** - Variação ±15% no delay para parecer natural
+
+Arquivos modificados:
+- `implementation/account_manager.py` - Adicionada classe `RoundRobinAccountRotator`
+- `implementation/instagram_dm_agent.py` - Adicionado método `run_campaign_kevs()`
+- `implementation/api_server.py` - Novos parâmetros: `kevs_mode`, `delay_min`, `delay_max`
 
 ---
 
@@ -90,6 +117,19 @@ Sistema de **prospecção automatizada B2B** com IA para a MOTTIVME. Faz scrapin
 - Endpoints: /webhook/rag-ingest, /webhook/rag-search
 - Embeddings OpenAI text-embedding-3-small
 - Busca semântica com pgvector
+
+### Multi-Tenant Instagram Accounts (2026-01-17)
+- Tabela `instagram_accounts` com múltiplas contas por tenant
+- Sessões salvas em `session_data` (JSON do Playwright)
+- AccountManager faz rotação automática de contas
+- Limites por conta: `daily_limit`, `hourly_limit`
+- Arquivo: `implementation/account_manager.py`
+
+### Message Generator - Charlie Morgan Style (2026-01-17)
+- Templates curtos, vagos, curiosos
+- Extrai especialidades da bio do lead
+- Níveis: ultra (score>=70), high (>=50), medium (<50)
+- Arquivo: `implementation/message_generator.py`
 
 ---
 

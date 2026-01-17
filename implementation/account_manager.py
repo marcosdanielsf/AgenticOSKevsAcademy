@@ -355,6 +355,116 @@ class AccountManager:
         }
 
 
+# ==============================================
+# MÉTODO KEVS - ROUND-ROBIN ACCOUNT ROTATOR
+# ==============================================
+
+class RoundRobinAccountRotator:
+    """
+    Implementa rotação round-robin entre contas para evitar bloqueios.
+
+    Em vez de esgotar uma conta antes de passar para a próxima,
+    alterna entre contas: A→B→C→A→B→C
+
+    Método Kevs Academy:
+    - Nunca enviar muitas DMs de uma mesma conta
+    - Alternar entre contas a cada DM
+    - Pular contas bloqueadas automaticamente
+
+    Exemplo:
+        rotator = RoundRobinAccountRotator("mottivme")
+
+        for lead in leads:
+            account = rotator.get_next_account()
+            if account:
+                send_dm(account, lead)
+                rotator.record_dm_sent(account.id)
+    """
+
+    def __init__(self, tenant_id: str):
+        self.tenant_id = tenant_id
+        self.manager = AccountManager()
+        self.accounts: List[InstagramAccount] = []
+        self.current_index = 0
+        self._refresh_accounts()
+
+    def _refresh_accounts(self):
+        """Atualiza lista de contas disponíveis"""
+        all_accounts = self.manager.get_tenant_accounts(self.tenant_id)
+        self.accounts = [a for a in all_accounts if a.is_available]
+
+        if not self.accounts:
+            logger.warning(f"⚠️ Nenhuma conta disponível para tenant {self.tenant_id}")
+        else:
+            logger.info(f"🔄 Round-robin: {len(self.accounts)} contas disponíveis")
+            for acc in self.accounts:
+                logger.info(f"   @{acc.username}: {acc.remaining_today} DMs restantes hoje")
+
+    def get_next_account(self) -> Optional[InstagramAccount]:
+        """
+        Retorna a próxima conta na rotação round-robin.
+        Pula contas que ficaram indisponíveis durante a sessão.
+        """
+        if not self.accounts:
+            self._refresh_accounts()
+            if not self.accounts:
+                return None
+
+        # Tenta encontrar uma conta disponível a partir do índice atual
+        attempts = 0
+        while attempts < len(self.accounts):
+            account = self.accounts[self.current_index]
+            self.current_index = (self.current_index + 1) % len(self.accounts)
+
+            # Verifica se a conta ainda está disponível
+            if account.is_available and account.remaining_today > 0 and account.remaining_this_hour > 0:
+                return account
+
+            attempts += 1
+
+        # Nenhuma conta disponível - atualiza lista e tenta novamente
+        logger.warning("⚠️ Todas as contas na rotação estão no limite. Atualizando lista...")
+        self._refresh_accounts()
+
+        if self.accounts:
+            return self.accounts[0]
+        return None
+
+    def record_dm_sent(self, account_id: int):
+        """Registra que uma DM foi enviada pela conta"""
+        self.manager.record_usage(account_id)
+
+        # Atualiza contadores locais
+        for acc in self.accounts:
+            if acc.id == account_id:
+                acc.dms_sent_today += 1
+                acc.dms_sent_last_hour += 1
+                break
+
+    def mark_account_blocked(self, account_id: int, hours: int = 24, reason: str = None):
+        """Marca conta como bloqueada e remove da rotação"""
+        self.manager.mark_blocked(account_id, hours, reason)
+        self.accounts = [a for a in self.accounts if a.id != account_id]
+        logger.warning(f"⛔ Conta {account_id} removida da rotação: {reason}")
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Retorna estatísticas da rotação atual"""
+        return {
+            "tenant_id": self.tenant_id,
+            "accounts_in_rotation": len(self.accounts),
+            "current_index": self.current_index,
+            "accounts": [
+                {
+                    "username": a.username,
+                    "remaining_today": a.remaining_today,
+                    "remaining_this_hour": a.remaining_this_hour,
+                    "is_available": a.is_available
+                }
+                for a in self.accounts
+            ]
+        }
+
+
 # Fallback for backward compatibility
 def get_default_account() -> Optional[InstagramAccount]:
     """

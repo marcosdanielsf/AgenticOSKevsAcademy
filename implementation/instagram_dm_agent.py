@@ -54,10 +54,11 @@ except ImportError:
 
 # Import multi-tenant account manager
 try:
-    from account_manager import AccountManager, InstagramAccount, get_default_account
+    from account_manager import AccountManager, InstagramAccount, get_default_account, RoundRobinAccountRotator
     MULTI_TENANT_AVAILABLE = True
 except ImportError:
     MULTI_TENANT_AVAILABLE = False
+    RoundRobinAccountRotator = None
     logger.warning("AccountManager not available - using single account mode")
 
 # Load environment
@@ -1171,6 +1172,211 @@ class InstagramDMAgent:
         logger.info("="*60)
 
         # Save session
+        await self.save_session()
+
+    async def run_campaign_kevs(
+        self,
+        limit: int = 200,
+        template_id: int = 1,
+        min_score: int = 0,
+        delay_min_minutes: float = 3.0,
+        delay_max_minutes: float = 7.0
+    ):
+        """
+        MÉTODO KEVS ANTI-BLOCK: Campanha com rotação round-robin e delay em minutos.
+
+        Diferenças do run_campaign normal:
+        1. Rotação round-robin entre contas (A→B→C→A, não esgota uma antes)
+        2. Delay em MINUTOS (não segundos) entre cada DM
+        3. Jitter humano para parecer natural
+
+        Args:
+            limit: Número máximo de leads para processar
+            template_id: ID do template de mensagem (se não usar smart mode)
+            min_score: Score mínimo para enviar DM (0=todos)
+            delay_min_minutes: Delay mínimo entre DMs em MINUTOS (padrão: 3)
+            delay_max_minutes: Delay máximo entre DMs em MINUTOS (padrão: 7)
+
+        Fluxo esperado:
+            08:00 → Conta A: DM1
+            08:05 → Conta B: DM2
+            08:11 → Conta C: DM3
+            08:17 → Conta A: DM4  ← volta pro início
+        """
+        logger.info("="*60)
+        logger.info("🎯 INICIANDO CAMPANHA KEVS ANTI-BLOCK")
+        logger.info(f"⏱️  Delay entre DMs: {delay_min_minutes}-{delay_max_minutes} minutos")
+        logger.info(f"🔄 Modo: Rotação Round-Robin entre contas")
+        if min_score > 0:
+            logger.info(f"🎯 Filtro de qualidade: min_score >= {min_score}")
+        logger.info("="*60)
+
+        # Verificar se RoundRobin está disponível
+        if not MULTI_TENANT_AVAILABLE or not RoundRobinAccountRotator:
+            logger.warning("⚠️ RoundRobinAccountRotator não disponível. Usando modo single account.")
+            return await self.run_campaign(limit, template_id, min_score)
+
+        # Inicializar rotador round-robin
+        rotator = RoundRobinAccountRotator(self.tenant_id)
+        rotator_stats = rotator.get_stats()
+
+        if rotator_stats['accounts_in_rotation'] == 0:
+            logger.error(f"❌ Nenhuma conta disponível para tenant {self.tenant_id}")
+            return
+
+        logger.info(f"🔄 Contas na rotação: {rotator_stats['accounts_in_rotation']}")
+        for acc in rotator_stats['accounts']:
+            logger.info(f"   @{acc['username']}: {acc['remaining_today']} DMs disponíveis hoje")
+
+        # Iniciar tracking de run
+        first_account = rotator.get_next_account()
+        if not first_account:
+            logger.error("❌ Nenhuma conta disponível para iniciar campanha")
+            return
+
+        self.db.start_run(first_account.username, self.tenant_id)
+
+        # Buscar leads com filtro de qualidade
+        leads = self.db.get_leads_to_contact(limit=limit, min_score=min_score, prioritize_scored=True)
+        if not leads:
+            logger.warning("⚠️ Nenhum lead para contatar!")
+            self.db.end_run(0, 0, 0, status='no_leads')
+            return
+
+        logger.info(f"📋 Processando {len(leads)} leads (ordenados por prioridade)")
+
+        try:
+            for i, lead in enumerate(leads):
+                # Pegar próxima conta na rotação
+                current_account = rotator.get_next_account()
+
+                if not current_account:
+                    logger.warning("⚠️ Todas as contas atingiram o limite. Parando campanha.")
+                    break
+
+                logger.info(f"\n🔄 DM #{i+1} usando @{current_account.username}")
+
+                # Trocar para a conta atual (se necessário recarregar sessão)
+                if self.current_account and self.current_account.id != current_account.id:
+                    logger.info(f"   Alternando de @{self.current_account.username} → @{current_account.username}")
+                    self.current_account = current_account
+                    # Recarregar contexto do browser com nova sessão se necessário
+                    if current_account.session_data and self.context:
+                        try:
+                            await self.context.close()
+                            context_options = {
+                                'viewport': {'width': 1280, 'height': 800},
+                                'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+                                'storage_state': current_account.session_data
+                            }
+                            self.context = await self.browser.new_context(**context_options)
+                            self.page = await self.context.new_page()
+                            if self.smart_mode:
+                                self.scraper = InstagramProfileScraperVision(self.page)
+                        except Exception as e:
+                            logger.warning(f"   Erro ao alternar conta: {e}. Continuando...")
+
+                # Gerar mensagem (Smart Mode ou Template)
+                profile = None
+                if self.smart_mode:
+                    message, score, profile = await self.analyze_and_generate_message(lead)
+
+                    # Pular se score muito baixo
+                    if message is None:
+                        self.dms_skipped += 1
+                        logger.info(f"📊 Progresso: {i+1}/{len(leads)} | Enviados: {self.dms_sent} | Skipped: {self.dms_skipped}")
+                        continue
+
+                    template_name = f"kevs_smart_{score.priority.value}" if score else "kevs_smart_fallback"
+                else:
+                    message = self.get_personalized_message(lead, template_id)
+                    template_name = f"kevs_template_{template_id}"
+
+                # Enviar DM
+                result = await self.send_dm(lead, message)
+
+                # Registrar resultado
+                self.results.append(result)
+                self.db.record_dm_sent(result, template_name, current_account.username)
+
+                if result.success:
+                    self.dms_sent += 1
+                    rotator.record_dm_sent(current_account.id)
+
+                    # Sincronizar com growth_leads
+                    lead_data = {
+                        'full_name': lead.full_name,
+                        'bio': lead.bio,
+                        'followers_count': getattr(profile, 'followers_count', None) if profile else None,
+                        'following_count': getattr(profile, 'following_count', None) if profile else None,
+                        'media_count': getattr(profile, 'media_count', None) if profile else None,
+                        'is_verified': getattr(profile, 'is_verified', None) if profile else None,
+                        'is_business_account': getattr(profile, 'is_business_account', None) if profile else None
+                    }
+                    score_data = None
+                    if self.smart_mode and score:
+                        score_data = {
+                            'icp_score': score.total_score,
+                            'priority': score.priority.value
+                        }
+                    self.db.sync_to_growth_leads(lead.username, result.message_sent, lead_data, score_data)
+                else:
+                    self.dms_failed += 1
+
+                    # Verificar se foi bloqueado
+                    if result.error and ('blocked' in result.error.lower() or 'rate' in result.error.lower()):
+                        logger.warning(f"⛔ Conta @{current_account.username} pode estar bloqueada!")
+                        rotator.mark_account_blocked(current_account.id, hours=24, reason=result.error)
+
+                # Progresso
+                logger.info(f"📊 Progresso: {i+1}/{len(leads)} | Enviados: {self.dms_sent} | Falhas: {self.dms_failed} | Skipped: {self.dms_skipped}")
+
+                # DELAY KEVS: Em MINUTOS com jitter humano
+                if i < len(leads) - 1:
+                    # Delay base em minutos
+                    delay_minutes = random.uniform(delay_min_minutes, delay_max_minutes)
+
+                    # Jitter humano: ±15% de variação
+                    jitter = delay_minutes * random.uniform(-0.15, 0.15)
+                    final_delay_minutes = delay_minutes + jitter
+
+                    delay_seconds = final_delay_minutes * 60
+
+                    logger.info(f"⏳ Aguardando {final_delay_minutes:.1f} minutos até próxima DM...")
+                    logger.info(f"   (Próxima conta será: rotação round-robin)")
+
+                    await asyncio.sleep(delay_seconds)
+
+        except KeyboardInterrupt:
+            logger.warning("⚠️ Campanha interrompida pelo usuário")
+        except Exception as e:
+            logger.error(f"❌ Erro na campanha: {e}")
+            self.db.end_run(self.dms_sent, self.dms_failed, self.dms_skipped, status='error', error_log=str(e))
+            raise
+
+        # Finalizar run
+        self.db.end_run(self.dms_sent, self.dms_failed, self.dms_skipped)
+
+        # Sumário final
+        logger.info("="*60)
+        logger.info("📊 CAMPANHA KEVS ANTI-BLOCK COMPLETA")
+        logger.info(f"   DMs Enviadas: {self.dms_sent}")
+        logger.info(f"   DMs Falharam: {self.dms_failed}")
+        logger.info(f"   DMs Skipped: {self.dms_skipped}")
+        logger.info(f"   Modo: 🔄 Round-Robin + ⏱️ Delay {delay_min_minutes}-{delay_max_minutes}min")
+
+        # Estatísticas finais das contas
+        final_stats = rotator.get_stats()
+        logger.info(f"   Contas usadas: {final_stats['accounts_in_rotation']}")
+        for acc in final_stats['accounts']:
+            logger.info(f"      @{acc['username']}: {acc['remaining_today']} DMs restantes")
+
+        total_processed = self.dms_sent + self.dms_failed
+        if total_processed > 0:
+            logger.info(f"   Taxa de sucesso: {(self.dms_sent/total_processed*100):.1f}%")
+        logger.info("="*60)
+
+        # Salvar sessão
         await self.save_session()
 
     async def stop(self):
