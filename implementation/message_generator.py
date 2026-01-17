@@ -25,140 +25,174 @@ class MessageGenerator:
     Usa dados do perfil e score para personalização.
     """
 
-    # Templates por nível de personalização
+    # ===========================================
+    # TEMPLATES ESTILO CHARLIE MORGAN
+    # Curto, vago, curioso - baseado na bio
+    # ===========================================
+
+    # Templates ULTRA personalizados (score >= 70 + profissão)
     ULTRA_PERSONALIZED_TEMPLATES = [
-        """Oi {first_name}! 👋
-
-Vi que você é {profession} em {location}. Muito legal o trabalho que você faz!
+        """{first_name}, vi que você trabalha com {profession}.
 
 {bio_hook}
 
-Tenho ajudado outros {profession}s a automatizar a prospecção de clientes no Instagram. Resultados têm sido bem interessantes.
+Posso te fazer uma pergunta?""",
 
-Posso te mostrar como funciona?""",
-
-        """E aí {first_name}!
-
-Curti muito seu perfil. {bio_hook}
-
-Trabalho com automação de prospecção no Instagram e vi que você provavelmente recebe muitas mensagens genéricas aqui...
-
-A diferença é que eu realmente olhei seu perfil antes de escrever 😅
-
-Posso te fazer uma pergunta rápida sobre {interest}?""",
-
-        """{first_name}, tudo bem?
-
-Notei que você trabalha com {profession} - área que admiro muito.
+        """{first_name}, curti seu perfil.
 
 {bio_hook}
 
-Desenvolvi uma solução que ajuda profissionais como você a encontrar clientes ideais de forma automatizada.
+Teria 2 min pra trocar uma ideia?""",
 
-Vale uma conversa de 5 min?"""
+        """Oi {first_name}
+
+{bio_hook}
+
+Acho que faz sentido a gente conversar. Posso te explicar o porquê?""",
+
+        """{first_name}, passei pelo seu perfil.
+
+{bio_hook}
+
+Me conta uma coisa: como tá a captação de clientes hoje?"""
     ]
 
+    # Templates personalizados (score >= 50)
     PERSONALIZED_TEMPLATES = [
-        """Oi {first_name}! 👋
+        """{first_name}, vi seu perfil.
 
 {bio_hook}
 
-Trabalho com automação de prospecção e acho que posso te ajudar a encontrar mais clientes no Instagram.
+Posso te fazer uma pergunta rápida?""",
 
-Interesse em saber mais?""",
+        """Oi {first_name}
 
-        """E aí {first_name}!
+{bio_hook}
 
-Vi seu perfil e achei interessante seu trabalho com {interest}.
+Faz sentido trocar uma ideia sobre isso?""",
 
-Tenho uma solução de automação que pode te economizar horas por dia na prospecção.
+        """{first_name}, curti o que você faz.
 
-Quer que eu te explique em 2 minutos?""",
+{bio_hook}
 
+Posso te mandar um áudio de 1 min explicando algo?""",
+
+        """{first_name}
+
+{bio_hook}
+
+Teria interesse em saber como alguns {profession}s estão resolvendo isso?"""
+    ]
+
+    # Templates padrão (score < 50) - ainda curtos e curiosos
+    STANDARD_TEMPLATES = [
         """{first_name}, tudo bem?
 
-Passei pelo seu perfil e vi que você é {profession}.
+Vi seu perfil e achei interessante.
 
-Ajudo profissionais como você a automatizar a captação de clientes no Instagram.
+Posso te fazer uma pergunta?""",
 
-Posso te mostrar como funciona?"""
+        """Oi {first_name}
+
+Passei pelo seu perfil.
+
+Faz sentido trocar uma ideia rápida?""",
+
+        """{first_name}
+
+Curti seu trabalho.
+
+Posso te contar algo que talvez te interesse?""",
+
+        """{first_name}, beleza?
+
+Vi que você é {profession}.
+
+Me conta: como tá a demanda de clientes hoje?"""
     ]
 
-    STANDARD_TEMPLATES = [
-        """Oi {first_name}! 👋
+    # ===========================================
+    # HOOKS ESTILO CHARLIE MORGAN
+    # Curtos, específicos, geram curiosidade
+    # ===========================================
 
-Tudo bem? Vi seu perfil e achei interessante.
-
-Trabalho com automação de prospecção no Instagram - ajudando profissionais a encontrar clientes de forma mais eficiente.
-
-Quer saber mais?""",
-
-        """E aí {first_name}!
-
-Prazer! Passei pelo seu perfil e resolvi mandar uma mensagem.
-
-Desenvolvo soluções de automação para Instagram. Posso te mostrar como funciona?""",
-
-        """{first_name}, tudo certo?
-
-Sou especialista em automação de prospecção no Instagram.
-
-Se você busca mais clientes, posso te ajudar. Interesse em uma conversa rápida?"""
-    ]
-
-    # Hooks baseados em profissão
+    # Hooks baseados em profissão (curtos e curiosos)
     PROFESSION_HOOKS = {
         'médico': [
-            "Sei que a rotina de consultório é corrida, mas tenho algo que pode te interessar.",
-            "Muitos médicos têm usado automação para captar mais pacientes particulares.",
+            "Notei que você atende particular.",
+            "Vi que você é da área de saúde.",
+            "Sei como é corrida a rotina de consultório.",
         ],
         'dentista': [
-            "Tenho trabalhado com vários dentistas que querem mais pacientes de estética.",
-            "A captação de pacientes mudou muito - automação tá fazendo diferença.",
+            "Vi que você trabalha com estética dental.",
+            "Notei seu trabalho com harmonização.",
+            "Curti os resultados que você posta.",
         ],
         'advogado': [
-            "Advogados que prospectam bem no Instagram têm se destacado muito.",
-            "Captação de clientes para advocacia tá cada vez mais digital.",
+            "Vi que você atua na área jurídica.",
+            "Notei sua especialidade.",
+            "Interessante seu posicionamento aqui.",
         ],
         'empresário': [
-            "Empresários que automatizam a prospecção conseguem escalar muito mais rápido.",
-            "Automação de vendas é o que mais cresce entre empresários que conheço.",
+            "Vi que você empreende.",
+            "Notei seu negócio.",
+            "Curti a proposta da sua empresa.",
         ],
         'coach': [
-            "Coaches que automatizam a captação conseguem focar mais na entrega.",
-            "A prospecção manual rouba muito tempo que poderia ir para os alunos.",
+            "Vi seu trabalho com desenvolvimento pessoal.",
+            "Notei sua metodologia.",
+            "Curti sua abordagem.",
         ],
         'consultor': [
-            "Consultores de sucesso estão todos automatizando a captação.",
-            "Prospectar manualmente é coisa do passado para consultores.",
+            "Vi que você faz consultoria.",
+            "Notei sua área de atuação.",
+            "Interessante seu nicho.",
         ],
         'nutricionista': [
-            "Nutricionistas que automatizam a captação triplicam os atendimentos.",
-            "Muitos nutris estão crescendo rápido com automação de Instagram.",
+            "Vi seu trabalho com nutrição.",
+            "Notei sua especialidade.",
+            "Curti seu conteúdo sobre alimentação.",
         ],
         'psicólogo': [
-            "Psicólogos que usam automação conseguem ajudar mais pessoas.",
-            "A demanda por saúde mental tá alta - automação ajuda a alcançar quem precisa.",
+            "Vi seu trabalho com saúde mental.",
+            "Notei sua abordagem terapêutica.",
+            "Curti seu conteúdo.",
         ],
         'marketing': [
-            "Quem é de marketing sabe que automação é o futuro.",
-            "Profissionais de marketing adoram quando mostro as métricas da automação.",
+            "Vi que você é da área de marketing.",
+            "Notei seu trabalho com growth.",
+            "Curti suas estratégias.",
         ],
-        'desenvolvedor': [
-            "Devs geralmente adoram ver a arquitetura da automação que criei.",
-            "Acho que você vai curtir o lado técnico da solução.",
+        'estetica': [
+            "Vi seu trabalho com estética.",
+            "Notei seus resultados.",
+            "Curti os antes e depois.",
+        ],
+        'fisioterapeuta': [
+            "Vi seu trabalho com fisioterapia.",
+            "Notei sua especialidade.",
+            "Curti sua abordagem.",
+        ],
+        'personal': [
+            "Vi seu trabalho como personal.",
+            "Notei seus resultados com alunos.",
+            "Curti sua metodologia.",
         ]
     }
 
-    # Hooks baseados em interesses
+    # Hooks baseados em interesses (curtos)
     INTEREST_HOOKS = {
-        'marketing': "Vi que você curte marketing/growth - isso vai te interessar.",
-        'tecnologia': "Como você é de tech, vai entender rápido o poder da automação.",
-        'negocios': "Para quem foca em negócios, isso pode ser um game changer.",
-        'estetica': "O mercado de estética é perfeito para prospecção automatizada.",
-        'saude': "Profissionais de saúde estão cada vez mais usando automação.",
-        'financas': "O ROI dessa automação é muito claro - você vai gostar dos números.",
-        'educacao': "Quem trabalha com educação pode escalar muito com automação."
+        'marketing': "Notei que você manja de marketing.",
+        'tecnologia': "Vi que você curte tecnologia.",
+        'negocios': "Notei seu foco em negócios.",
+        'estetica': "Vi que você é da área de estética.",
+        'saude': "Notei que você é da área de saúde.",
+        'financas': "Vi que você trabalha com finanças.",
+        'educacao': "Notei seu trabalho com educação.",
+        'fitness': "Vi seu trabalho com fitness.",
+        'beleza': "Notei seu trabalho com beleza.",
+        'longevidade': "Vi seu foco em longevidade.",
+        'bem-estar': "Notei seu trabalho com bem-estar.",
     }
 
     def generate(
@@ -266,25 +300,69 @@ Se você busca mais clientes, posso te ajudar. Interesse em uma conversa rápida
         profession: Optional[str],
         interests: List[str]
     ) -> str:
-        """Gera um hook personalizado baseado na bio"""
+        """
+        Gera hook CURIOSO baseado na bio - estilo Charlie Morgan.
+        Prioriza informações específicas da bio sobre hooks genéricos.
+        """
         hooks = []
 
-        # Hook de profissão
-        if profession and profession in self.PROFESSION_HOOKS:
+        # PRIORIDADE 1: Extrair algo específico da bio
+        if bio and len(bio) > 10:
+            bio_lower = bio.lower()
+
+            # Detectar especialidades específicas
+            specialties = {
+                'longevidade': 'Vi seu foco em longevidade.',
+                'emagrecimento': 'Notei seu trabalho com emagrecimento.',
+                'harmonização': 'Curti seu trabalho com harmonização.',
+                'estética': 'Vi seus resultados com estética.',
+                'botox': 'Notei seu trabalho com procedimentos.',
+                'implante': 'Vi que você trabalha com implantes.',
+                'ortodontia': 'Notei seu trabalho com ortodontia.',
+                'personal': 'Vi seu trabalho como personal.',
+                'crossfit': 'Notei que você é de crossfit.',
+                'pilates': 'Vi seu trabalho com pilates.',
+                'yoga': 'Notei seu trabalho com yoga.',
+                'coaching': 'Vi que você faz coaching.',
+                'mentoria': 'Notei que você faz mentoria.',
+                'consultoria': 'Vi que você faz consultoria.',
+                'dermatologia': 'Notei sua especialidade em dermato.',
+                'cardiologia': 'Vi que você é cardiologista.',
+                'ortopedia': 'Notei que você é ortopedista.',
+                'ginecologia': 'Vi sua especialidade.',
+                'pediatria': 'Notei que você atende crianças.',
+                'psiquiatria': 'Vi seu trabalho com psiquiatria.',
+                'nutrologia': 'Notei seu trabalho com nutrologia.',
+                'endocrino': 'Vi que você é endócrino.',
+                'integrativa': 'Notei seu foco em medicina integrativa.',
+                'funcional': 'Vi seu trabalho com medicina funcional.',
+                'clínica': 'Notei sua clínica.',
+                'consultório': 'Vi que você tem consultório próprio.',
+            }
+
+            for keyword, hook in specialties.items():
+                if keyword in bio_lower:
+                    hooks.append(hook)
+                    break
+
+            # Extrair primeira parte da bio (antes de | ou 📍 ou •)
+            if not hooks:
+                for separator in ['|', '📍', '•', '🔹', '✨', '\n']:
+                    if separator in bio:
+                        first_part = bio.split(separator)[0].strip()
+                        if 10 < len(first_part) < 50:
+                            hooks.append(f"Vi que você trabalha com {first_part.lower()}.")
+                            break
+
+        # PRIORIDADE 2: Hook de profissão (se não achou nada específico)
+        if not hooks and profession and profession in self.PROFESSION_HOOKS:
             hooks.extend(self.PROFESSION_HOOKS[profession])
 
-        # Hook de interesse
-        for interest in interests:
-            if interest in self.INTEREST_HOOKS:
-                hooks.append(self.INTEREST_HOOKS[interest])
-
-        # Hook genérico da bio
-        if bio and len(bio) > 20:
-            # Extrair algo interessante da bio
-            if '|' in bio:
-                parts = bio.split('|')
-                if len(parts) > 1:
-                    hooks.append(f"Vi que você trabalha com {parts[0].strip()}.")
+        # PRIORIDADE 3: Hook de interesse
+        if not hooks:
+            for interest in interests:
+                if interest in self.INTEREST_HOOKS:
+                    hooks.append(self.INTEREST_HOOKS[interest])
 
         if hooks:
             return random.choice(hooks)
