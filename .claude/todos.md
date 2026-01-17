@@ -1,7 +1,7 @@
 # AgenticOS - Lista de Tarefas
 
-> **Atualizado em:** 2026-01-17 (09:30)
-> **Status:** DMs funcionando, templates Charlie Morgan implementados
+> **Atualizado em:** 2026-01-17 (15:00)
+> **Status:** Spintax Híbrido + Clone System SOP implementados
 > **Leia este arquivo apos reset de memoria para saber onde parou**
 
 ---
@@ -74,7 +74,41 @@
 }
 ```
 
-## PRÓXIMA SESSÃO - Teste e Refinamento
+## Sessão 2026-01-17 (Tarde) - SPINTAX + SOP
+
+### ✅ Concluído: Análise de Documentação
+- [x] Análise do Stack Kevin Badi (Claude Code + Playwright MCP)
+- [x] Comparação de opções Playwright MCP (Stealth recomendado)
+- [x] Clone System SOP documentado
+- [x] Instagram Private API documentado
+
+### ✅ Concluído: Spintax Híbrido
+- [x] Função `expand_spintax()` para variação sintática
+- [x] Templates de saudação com spintax
+- [x] Templates de fechamento com spintax por nível
+- [x] Método `generate_hybrid()` que combina spintax + IA
+- [x] Conteúdo central continua personalizado por IA/bio
+
+### Arquivos Criados/Modificados:
+- `.claude/spec/clone-system-sop.md` - SOP completo do Clone System
+- `implementation/message_generator.py` - Spintax híbrido adicionado
+
+---
+
+## PRÓXIMA SESSÃO - Implementações Pendentes
+
+### P0 - Urgente
+- [ ] Block detection no `instagram_dm_agent.py`
+- [ ] Testar spintax híbrido em campanha real
+
+### P1 - Importante
+- [ ] Warm-up protocol manager
+- [ ] Instagram Private API extraction
+- [ ] Proxy rotation infrastructure
+
+### P2 - Infraestrutura
+- [ ] Stealth Browser MCP integration
+- [ ] Redis para rate limiting distribuído
 
 ---
 

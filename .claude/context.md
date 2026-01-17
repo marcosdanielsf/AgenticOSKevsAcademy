@@ -131,6 +131,22 @@ Arquivos modificados:
 - Níveis: ultra (score>=70), high (>=50), medium (<50)
 - Arquivo: `implementation/message_generator.py`
 
+### Spintax Híbrido (2026-01-17)
+- **Saudação**: Spintax (variação sintática anti-spam)
+- **Conteúdo**: IA (personalização semântica baseada na bio)
+- **Fechamento**: Spintax (variação sintática anti-spam)
+- Função: `expand_spintax()` - Expande `{opção1|opção2}` aleatoriamente
+- Método: `generate_hybrid()` - Combina spintax + personalização IA
+- Arquivo: `implementation/message_generator.py`
+
+### Clone System SOP (2026-01-17)
+- Documento consolidado com melhores práticas
+- Protocolo de warm-up 21 dias
+- Limites de segurança por conta
+- Infraestrutura de proxies recomendada
+- Instagram Private API (FBID, geolocation)
+- Arquivo: `.claude/spec/clone-system-sop.md`
+
 ---
 
 ## Frontends Relacionados

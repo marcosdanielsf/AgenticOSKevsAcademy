@@ -2,11 +2,54 @@
 Message Generator - Gerador de Mensagens Personalizadas
 ========================================================
 Gera mensagens de DM altamente personalizadas baseadas no perfil e score do lead.
+
+Inclui suporte a SPINTAX para variação automática de mensagens:
+- Sintaxe: {opção1|opção2|opção3}
+- Evita detecção de spam pelo Instagram
+- Cada mensagem é única
 """
 
 import random
+import re
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
+
+
+# ===========================================
+# SPINTAX ENGINE
+# ===========================================
+
+def expand_spintax(text: str) -> str:
+    """
+    Expande spintax recursivamente.
+
+    Sintaxe: {opção1|opção2|opção3}
+
+    Exemplo:
+        Input: "{Oi|Olá}, {tudo bem|como vai}?"
+        Output: "Olá, como vai?" (aleatorizado)
+
+    Suporta aninhamento:
+        Input: "{Oi|{E aí|Fala}}, beleza?"
+        Output: "E aí, beleza?" (aleatorizado)
+    """
+    if not text:
+        return text
+
+    pattern = r'\{([^{}]+)\}'
+
+    def replace_match(match):
+        options = match.group(1).split('|')
+        return random.choice(options).strip()
+
+    # Loop para resolver spintax aninhado
+    max_iterations = 10
+    iteration = 0
+    while re.search(pattern, text) and iteration < max_iterations:
+        text = re.sub(pattern, replace_match, text)
+        iteration += 1
+
+    return text
 
 
 @dataclass
@@ -17,12 +60,60 @@ class GeneratedMessage:
     personalization_level: str  # ultra, high, medium, low
     hooks_used: List[str]
     confidence: float  # 0-1
+    spintax_used: bool = False
+
+
+# ===========================================
+# SPINTAX HÍBRIDO - Só elementos fixos
+# Saudações e fechamentos variam, conteúdo é IA
+# ===========================================
+
+# Saudações com spintax (elemento fixo)
+SPINTAX_GREETINGS = [
+    "{Oi|Olá|E aí} {first_name}",
+    "{first_name}, {tudo bem|beleza|tudo certo}?",
+    "{Fala|E aí|Opa} {first_name}",
+    "{first_name}",  # Direto ao ponto
+]
+
+# Fechamentos com spintax (elemento fixo)
+SPINTAX_CLOSINGS = [
+    "{Posso te fazer uma pergunta|Teria 2 min pra trocar uma ideia}?",
+    "{Faz sentido|Faria sentido} a gente conversar?",
+    "{Me conta|Conta pra mim}: como {tá|está} a captação de clientes {hoje|atualmente}?",
+    "{Posso te explicar melhor|Te explico melhor} por aqui?",
+    "{Queria te perguntar uma coisa|Tenho uma pergunta rápida}.",
+    "{Posso te mandar um áudio|Te mando um áudio} de 1 min?",
+]
+
+# Fechamentos por nível de score
+SPINTAX_CLOSINGS_BY_LEVEL = {
+    "ultra": [
+        "{Posso te fazer uma pergunta|Queria te perguntar uma coisa}?",
+        "{Me conta|Conta pra mim}: como {tá|está} a captação {hoje|atualmente}?",
+        "{Acho que faz sentido|Talvez faça sentido} a gente conversar.",
+    ],
+    "high": [
+        "{Posso te fazer uma pergunta rápida|Teria 2 min}?",
+        "{Faz sentido|Faria sentido} trocar uma ideia?",
+        "{Posso te mandar um áudio|Te mando um áudio} de 1 min?",
+    ],
+    "medium": [
+        "{Posso te fazer uma pergunta|Queria te perguntar}?",
+        "{Faz sentido|Faria sentido} trocar uma ideia rápida?",
+        "{Posso te contar algo|Te conto algo} que {pode te interessar|talvez te interesse}?",
+    ]
+}
 
 
 class MessageGenerator:
     """
     Gera mensagens personalizadas para DMs do Instagram.
-    Usa dados do perfil e score para personalização.
+
+    Modo HÍBRIDO:
+    - Saudação: Spintax (variação sintática)
+    - Conteúdo: IA (personalização semântica baseada na bio)
+    - Fechamento: Spintax (variação sintática)
     """
 
     # ===========================================
@@ -404,9 +495,106 @@ Me conta: como tá a demanda de clientes hoje?"""
 
         return round((base + score_factor) / 2, 2)
 
+    def generate_hybrid(
+        self,
+        profile: Dict[str, Any],
+        score_data: Dict[str, Any],
+        use_spintax: bool = True
+    ) -> GeneratedMessage:
+        """
+        Gera mensagem com SPINTAX HÍBRIDO.
 
-# Função helper
-def generate_message(profile: Dict, score_data: Dict) -> GeneratedMessage:
-    """Helper para gerar mensagem"""
+        Estrutura:
+        - Saudação: Spintax (variação sintática anti-spam)
+        - Conteúdo: IA (personalização semântica baseada na bio)
+        - Fechamento: Spintax (variação sintática anti-spam)
+
+        Args:
+            profile: Dados do perfil do Instagram
+            score_data: Dados do score
+            use_spintax: Se True, expande spintax. Se False, retorna com sintaxe raw.
+
+        Returns:
+            GeneratedMessage com spintax expandido
+        """
+        # Extrair dados
+        full_name = profile.get('full_name', profile.get('username', ''))
+        first_name = self._extract_first_name(full_name)
+        bio = profile.get('bio', '')
+
+        profession = score_data.get('detected_profession')
+        interests = score_data.get('detected_interests', [])
+        total_score = score_data.get('total_score', 0)
+
+        # Determinar nível
+        if total_score >= 70:
+            level = 'ultra'
+        elif total_score >= 50:
+            level = 'high'
+        else:
+            level = 'medium'
+
+        # 1. SAUDAÇÃO (Spintax)
+        greeting_template = random.choice(SPINTAX_GREETINGS)
+        greeting = greeting_template.replace('{first_name}', first_name)
+
+        # 2. CONTEÚDO (IA - personalizado pela bio)
+        bio_hook = self._generate_bio_hook(bio, profession, interests)
+
+        # 3. FECHAMENTO (Spintax por nível)
+        closings = SPINTAX_CLOSINGS_BY_LEVEL.get(level, SPINTAX_CLOSINGS_BY_LEVEL['medium'])
+        closing = random.choice(closings)
+
+        # Montar mensagem
+        if bio_hook:
+            message = f"{greeting}\n\n{bio_hook}\n\n{closing}"
+        else:
+            message = f"{greeting}\n\n{closing}"
+
+        # Expandir spintax se habilitado
+        if use_spintax:
+            message = expand_spintax(message)
+
+        # Limpar
+        message = self._clean_message(message)
+
+        # Hooks usados
+        hooks_used = ['spintax:hybrid']
+        if profession:
+            hooks_used.append(f"profession:{profession}")
+        if interests:
+            hooks_used.append(f"interests:{','.join(interests)}")
+
+        return GeneratedMessage(
+            message=message,
+            template_used=f"hybrid:{level}",
+            personalization_level=level,
+            hooks_used=hooks_used,
+            confidence=self._calculate_confidence(total_score, level),
+            spintax_used=use_spintax
+        )
+
+
+# Funções helper
+def generate_message(profile: Dict, score_data: Dict, hybrid: bool = False) -> GeneratedMessage:
+    """
+    Helper para gerar mensagem.
+
+    Args:
+        profile: Dados do perfil Instagram
+        score_data: Dados do score
+        hybrid: Se True, usa spintax híbrido (saudação/fechamento variados)
+
+    Returns:
+        GeneratedMessage
+    """
     generator = MessageGenerator()
+    if hybrid:
+        return generator.generate_hybrid(profile, score_data)
     return generator.generate(profile, score_data)
+
+
+def generate_message_hybrid(profile: Dict, score_data: Dict) -> GeneratedMessage:
+    """Helper direto para modo híbrido (spintax + IA)"""
+    generator = MessageGenerator()
+    return generator.generate_hybrid(profile, score_data)
