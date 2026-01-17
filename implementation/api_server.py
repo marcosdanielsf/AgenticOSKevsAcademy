@@ -4596,7 +4596,11 @@ async def start_campaign(
 
             try:
                 from instagram_dm_agent import InstagramDMAgent
-                agent = InstagramDMAgent(tenant_id=request.tenant_id)
+                agent = InstagramDMAgent(tenant_id=request.tenant_id, headless=True)
+
+                # CRITICAL: Initialize agent and load account from database
+                await agent.start()
+
                 await agent.run_campaign(
                     limit=request.limit,
                     template_id=request.template_id,
@@ -4610,10 +4614,18 @@ async def start_campaign(
                 running_campaigns[campaign_id]["status"] = "completed"
                 running_campaigns[campaign_id]["completed_at"] = datetime.now().isoformat()
 
+                # Cleanup browser
+                await agent.stop()
+
             except Exception as e:
                 logger.error(f"Campaign error: {e}")
                 running_campaigns[campaign_id]["status"] = "failed"
                 running_campaigns[campaign_id]["error"] = str(e)
+                # Attempt cleanup even on error
+                try:
+                    await agent.stop()
+                except:
+                    pass
 
         except Exception as e:
             logger.error(f"Campaign task error: {e}")
