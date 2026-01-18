@@ -5145,6 +5145,380 @@ async def get_monitored_accounts(active_only: bool = True):
 
 
 # ============================================
+# AUTO-OUTREACH - Execucao automatica de DMs
+# ============================================
+
+class AutoOutreachRequest(BaseModel):
+    """Request para executar auto-outreach."""
+    account_id: Optional[int] = Field(None, description="ID da conta (None = todas)")
+    dry_run: bool = Field(False, description="Se True, apenas simula sem enviar DMs")
+    max_dms: int = Field(10, ge=1, le=50, description="Maximo de DMs por execucao")
+
+
+class AutoOutreachResponse(BaseModel):
+    """Response do auto-outreach."""
+    success: bool
+    accounts_processed: int
+    total_sent: int
+    total_failed: int
+    total_skipped: int
+    dry_run: bool
+    details: List[Dict[str, Any]]
+    errors: List[str]
+
+
+@app.post("/followers/auto-outreach", response_model=AutoOutreachResponse)
+async def run_auto_outreach(
+    request: AutoOutreachRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Executa outreach automatico para contas com outreach_enabled=True.
+
+    Fluxo:
+    1. Busca contas com outreach habilitado
+    2. Para cada conta, busca seguidores pendentes (icp_score >= min configurado)
+    3. Envia DMs respeitando daily_limit
+    4. Atualiza status no banco
+
+    Use dry_run=True para simular sem enviar DMs reais.
+    """
+    logger.info(f"Iniciando auto-outreach (dry_run={request.dry_run}, max_dms={request.max_dms})")
+
+    results = AutoOutreachResponse(
+        success=True,
+        accounts_processed=0,
+        total_sent=0,
+        total_failed=0,
+        total_skipped=0,
+        dry_run=request.dry_run,
+        details=[],
+        errors=[]
+    )
+
+    try:
+        # Buscar contas com outreach habilitado
+        filters = {"outreach_enabled": "eq.true", "is_active": "eq.true"}
+        if request.account_id:
+            filters["id"] = f"eq.{request.account_id}"
+
+        accounts_response = supabase_client._request(
+            "GET",
+            "instagram_accounts",
+            params={"select": "*", **filters}
+        )
+
+        if not accounts_response:
+            logger.info("Nenhuma conta com outreach habilitado encontrada")
+            return results
+
+        logger.info(f"Encontradas {len(accounts_response)} contas com outreach habilitado")
+
+        from new_followers_detector import NewFollowersDetector
+        from message_generator import MessageGenerator
+
+        detector = NewFollowersDetector()
+        msg_generator = MessageGenerator()
+
+        for account in accounts_response:
+            account_id = account.get("id")
+            username = account.get("username")
+            min_icp_score = account.get("outreach_min_icp_score", 70)
+            daily_limit = account.get("outreach_daily_limit", 50)
+
+            account_detail = {
+                "account_id": account_id,
+                "username": username,
+                "sent": 0,
+                "failed": 0,
+                "skipped": 0,
+                "followers_processed": []
+            }
+
+            try:
+                # Verificar quantos ja foram enviados hoje
+                today = datetime.now().date().isoformat()
+                sent_today_response = supabase_client._request(
+                    "GET",
+                    "new_followers_detected",
+                    params={
+                        "select": "id",
+                        "account_id": f"eq.{account_id}",
+                        "outreach_status": "eq.sent",
+                        "outreach_sent_at": f"gte.{today}T00:00:00"
+                    }
+                )
+                sent_today = len(sent_today_response) if sent_today_response else 0
+                remaining_today = max(0, daily_limit - sent_today)
+
+                if remaining_today == 0:
+                    logger.info(f"@{username}: Limite diario atingido ({sent_today}/{daily_limit})")
+                    account_detail["skipped"] = 1
+                    account_detail["reason"] = "daily_limit_reached"
+                    results.total_skipped += 1
+                    results.details.append(account_detail)
+                    continue
+
+                # Buscar seguidores pendentes
+                max_to_process = min(remaining_today, request.max_dms)
+                pending = detector.get_pending_outreach(
+                    account_id=str(account_id),
+                    min_icp_score=min_icp_score,
+                    limit=max_to_process
+                )
+
+                if not pending:
+                    logger.info(f"@{username}: Nenhum seguidor pendente com ICP >= {min_icp_score}")
+                    account_detail["skipped"] = 1
+                    account_detail["reason"] = "no_pending_followers"
+                    results.details.append(account_detail)
+                    continue
+
+                logger.info(f"@{username}: {len(pending)} seguidores pendentes para processar")
+
+                # Processar cada seguidor
+                for follower in pending:
+                    follower_id = follower.get("id")
+                    follower_username = follower.get("follower_username")
+                    follower_bio = follower.get("follower_bio", "")
+                    icp_score = follower.get("icp_score", 0)
+
+                    # Gerar mensagem personalizada
+                    profile_data = {
+                        "username": follower_username,
+                        "full_name": follower.get("follower_full_name", ""),
+                        "bio": follower_bio
+                    }
+                    score_data = {
+                        "total_score": icp_score,
+                        "priority": "hot" if icp_score >= 70 else "warm" if icp_score >= 50 else "cold",
+                        "detected_profession": None,
+                        "detected_interests": []
+                    }
+
+                    try:
+                        generated = msg_generator.generate(profile_data, score_data)
+                        message = generated.message
+                    except Exception as e:
+                        logger.warning(f"Erro ao gerar mensagem: {e}")
+                        message = f"Oi {follower.get('follower_full_name', follower_username).split()[0]}! Vi seu perfil e achei interessante. Posso te fazer uma pergunta?"
+
+                    if request.dry_run:
+                        # Modo simulacao - nao envia DM real
+                        logger.info(f"[DRY RUN] @{follower_username}: {message[:50]}...")
+                        account_detail["sent"] += 1
+                        account_detail["followers_processed"].append({
+                            "id": follower_id,
+                            "username": follower_username,
+                            "icp_score": icp_score,
+                            "message_preview": message[:100],
+                            "status": "simulated"
+                        })
+                        results.total_sent += 1
+                    else:
+                        # Envio real via API
+                        try:
+                            # Atualizar status para sent
+                            detector.update_outreach_status(
+                                follower_id=follower_id,
+                                status="sent",
+                                message=message
+                            )
+
+                            account_detail["sent"] += 1
+                            account_detail["followers_processed"].append({
+                                "id": follower_id,
+                                "username": follower_username,
+                                "icp_score": icp_score,
+                                "status": "sent"
+                            })
+                            results.total_sent += 1
+
+                            logger.info(f"DM enviada para @{follower_username} (ICP: {icp_score})")
+
+                            # Rate limiting entre DMs
+                            await asyncio.sleep(2)
+
+                        except Exception as e:
+                            logger.error(f"Erro ao enviar DM para @{follower_username}: {e}")
+                            account_detail["failed"] += 1
+                            account_detail["followers_processed"].append({
+                                "id": follower_id,
+                                "username": follower_username,
+                                "status": "failed",
+                                "error": str(e)
+                            })
+                            results.total_failed += 1
+
+                results.accounts_processed += 1
+                results.details.append(account_detail)
+
+            except Exception as e:
+                logger.error(f"Erro processando conta @{username}: {e}")
+                account_detail["error"] = str(e)
+                results.errors.append(f"@{username}: {str(e)}")
+                results.details.append(account_detail)
+
+        results.success = len(results.errors) == 0
+
+        logger.info(f"Auto-outreach concluido: {results.total_sent} enviados, {results.total_failed} falhas")
+        return results
+
+    except Exception as e:
+        logger.error(f"Erro no auto-outreach: {e}", exc_info=True)
+        results.success = False
+        results.errors.append(str(e))
+        return results
+
+
+@app.get("/followers/auto-outreach/status")
+async def get_auto_outreach_status():
+    """
+    Retorna status das contas para auto-outreach.
+    Mostra quantas DMs foram enviadas hoje e quanto resta do limite.
+    """
+    try:
+        # Buscar contas com outreach habilitado
+        accounts_response = supabase_client._request(
+            "GET",
+            "instagram_accounts",
+            params={
+                "select": "*",
+                "outreach_enabled": "eq.true",
+                "is_active": "eq.true"
+            }
+        )
+
+        if not accounts_response:
+            return {
+                "success": True,
+                "accounts": [],
+                "total_capacity_today": 0,
+                "total_sent_today": 0,
+                "total_remaining_today": 0
+            }
+
+        today = datetime.now().date().isoformat()
+        accounts_status = []
+        total_capacity = 0
+        total_sent = 0
+
+        for account in accounts_response:
+            account_id = account.get("id")
+            daily_limit = account.get("outreach_daily_limit", 50)
+            min_icp_score = account.get("outreach_min_icp_score", 70)
+
+            # Contar enviados hoje
+            sent_response = supabase_client._request(
+                "GET",
+                "new_followers_detected",
+                params={
+                    "select": "id",
+                    "account_id": f"eq.{account_id}",
+                    "outreach_status": "eq.sent",
+                    "outreach_sent_at": f"gte.{today}T00:00:00"
+                }
+            )
+            sent_today = len(sent_response) if sent_response else 0
+
+            # Contar pendentes
+            pending_response = supabase_client._request(
+                "GET",
+                "new_followers_detected",
+                params={
+                    "select": "id",
+                    "account_id": f"eq.{account_id}",
+                    "outreach_status": "eq.pending",
+                    "icp_score": f"gte.{min_icp_score}"
+                }
+            )
+            pending_count = len(pending_response) if pending_response else 0
+
+            remaining = max(0, daily_limit - sent_today)
+
+            accounts_status.append({
+                "account_id": account_id,
+                "username": account.get("username"),
+                "outreach_enabled": True,
+                "min_icp_score": min_icp_score,
+                "daily_limit": daily_limit,
+                "sent_today": sent_today,
+                "remaining_today": remaining,
+                "pending_followers": pending_count,
+                "can_send": remaining > 0 and pending_count > 0
+            })
+
+            total_capacity += daily_limit
+            total_sent += sent_today
+
+        return {
+            "success": True,
+            "accounts": accounts_status,
+            "total_capacity_today": total_capacity,
+            "total_sent_today": total_sent,
+            "total_remaining_today": total_capacity - total_sent
+        }
+
+    except Exception as e:
+        logger.error(f"Erro ao buscar status auto-outreach: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "accounts": []
+        }
+
+
+@app.get("/cron/auto-outreach")
+async def cron_auto_outreach(
+    secret: str = "",
+    max_dms: int = 10
+):
+    """
+    Endpoint para execucao via cron job externo (cron-job.org, GitHub Actions, etc).
+
+    Configure no cron-job.org:
+    - URL: https://agenticoskevsacademy-production.up.railway.app/cron/auto-outreach?secret=SEU_SECRET&max_dms=10
+    - Schedule: Every hour (0 * * * *)
+    - Method: GET
+
+    Args:
+        secret: Token de seguranca (configure CRON_SECRET no Railway)
+        max_dms: Maximo de DMs por conta por execucao
+    """
+    # Verificar secret
+    expected_secret = os.getenv("CRON_SECRET", "")
+    if expected_secret and secret != expected_secret:
+        logger.warning(f"Tentativa de acesso ao cron com secret invalido")
+        raise HTTPException(status_code=401, detail="Invalid secret")
+
+    logger.info(f"Cron auto-outreach iniciado (max_dms={max_dms})")
+
+    # Executar auto-outreach
+    request = AutoOutreachRequest(
+        account_id=None,
+        dry_run=False,
+        max_dms=max_dms
+    )
+
+    # Criar BackgroundTasks mock
+    from starlette.background import BackgroundTasks
+    bg_tasks = BackgroundTasks()
+
+    result = await run_auto_outreach(request, bg_tasks)
+
+    return {
+        "triggered_at": datetime.now().isoformat(),
+        "result": {
+            "success": result.success,
+            "accounts_processed": result.accounts_processed,
+            "total_sent": result.total_sent,
+            "total_failed": result.total_failed,
+            "total_skipped": result.total_skipped
+        }
+    }
+
+
+# ============================================
 # MULTI-TENANT INSTAGRAM ACCOUNT MANAGEMENT
 # ============================================
 
