@@ -423,7 +423,9 @@ class NewFollowersDetector:
                 cookies = session_data.get("cookies", [])
                 for cookie in cookies:
                     if cookie.get("name") == "sessionid":
-                        account_session_id = cookie.get("value")
+                        # Decodificar URL encoding (%3A -> :)
+                        from urllib.parse import unquote
+                        account_session_id = unquote(cookie.get("value", ""))
                         break
 
                 if account_session_id:
@@ -431,11 +433,15 @@ class NewFollowersDetector:
                     # Criar scraper temporario com session da conta
                     self.scraper = InstagramAPIScraper(session_id=account_session_id)
                 else:
-                    logger.warning(f"Conta @{username} nao tem sessionid nos cookies")
+                    logger.error(f"Conta @{username} nao tem sessionid nos cookies")
+                    result["error"] = "Conta sem sessionid nos cookies"
+                    return result
             else:
-                logger.warning(f"Conta @{username} nao tem session_data configurada")
+                logger.error(f"Conta @{username} nao tem session_data configurada")
+                result["error"] = "Conta sem session_data configurada"
+                return result
 
-            # 3. Buscar seguidores atuais (agora usando session da conta)
+            # 3. Buscar seguidores atuais (usando session da conta)
             current_followers = self.fetch_current_followers(username, max_followers)
             if not current_followers:
                 result["error"] = "Nao foi possivel buscar seguidores"
@@ -443,26 +449,26 @@ class NewFollowersDetector:
 
             result["current_followers_count"] = len(current_followers)
 
-            # 3. Buscar ultimo snapshot
+            # 4. Buscar ultimo snapshot
             last_snapshot = self.get_last_snapshot(account_id)
             result["has_previous_snapshot"] = last_snapshot is not None
 
-            # 4. Detectar novos
+            # 5. Detectar novos
             new_followers = self.detect_new_followers(
                 account_id, current_followers, last_snapshot
             )
             result["new_followers_count"] = len(new_followers)
 
-            # 5. Salvar novos seguidores
+            # 6. Salvar novos seguidores
             if new_followers:
                 saved = self.save_new_followers(account_id, new_followers, enrich=enrich)
                 result["saved_count"] = saved
 
-            # 6. Salvar novo snapshot
+            # 7. Salvar novo snapshot
             if save_snapshot:
                 self.save_snapshot(account_id, current_followers)
 
-            # 7. Atualizar conta
+            # 8. Atualizar conta
             self.update_account_check(account_id)
 
             result["success"] = True
