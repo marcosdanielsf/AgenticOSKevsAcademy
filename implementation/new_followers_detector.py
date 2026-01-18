@@ -416,7 +416,26 @@ class NewFollowersDetector:
             result["username"] = username
             logger.info(f"Iniciando deteccao para @{username}")
 
-            # 2. Buscar seguidores atuais
+            # 2. Extrair session_id da conta monitorada
+            session_data = account.get("session_data")
+            account_session_id = None
+            if session_data:
+                cookies = session_data.get("cookies", [])
+                for cookie in cookies:
+                    if cookie.get("name") == "sessionid":
+                        account_session_id = cookie.get("value")
+                        break
+
+                if account_session_id:
+                    logger.info(f"Usando session_id da conta @{username}")
+                    # Criar scraper temporario com session da conta
+                    self.scraper = InstagramAPIScraper(session_id=account_session_id)
+                else:
+                    logger.warning(f"Conta @{username} nao tem sessionid nos cookies")
+            else:
+                logger.warning(f"Conta @{username} nao tem session_data configurada")
+
+            # 3. Buscar seguidores atuais (agora usando session da conta)
             current_followers = self.fetch_current_followers(username, max_followers)
             if not current_followers:
                 result["error"] = "Nao foi possivel buscar seguidores"
