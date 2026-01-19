@@ -1207,19 +1207,39 @@ class InstagramDMAgent:
                 except:
                     pass
 
-            # Search for user - Instagram mudou placeholder de "Search..." para "Search"
-            await asyncio.sleep(1)
+            # Search for user - O modal "New message" tem campo com "Search..."
+            # IMPORTANTE: Pegar o campo DENTRO do modal (dialog), não o da lista atrás
+            await asyncio.sleep(1.5)  # Espera modal abrir completamente
+
             try:
+                # Primeiro tenta o campo dentro do modal/dialog
                 search_input = await self.page.wait_for_selector(
-                    'input[placeholder="Search"]',
-                    timeout=5000
+                    'div[role="dialog"] input[name="queryBox"]',
+                    timeout=3000
                 )
             except:
-                # Fallback para placeholder antigo
-                search_input = await self.page.wait_for_selector(
-                    'input[placeholder="Search..."]',
-                    timeout=5000
-                )
+                try:
+                    # Tenta pelo placeholder dentro do dialog
+                    search_input = await self.page.wait_for_selector(
+                        'div[role="dialog"] input[placeholder="Search..."]',
+                        timeout=3000
+                    )
+                except:
+                    try:
+                        # Fallback: qualquer input com Search... (modal usa esse)
+                        search_input = await self.page.wait_for_selector(
+                            'input[placeholder="Search..."]',
+                            timeout=3000
+                        )
+                    except:
+                        # Último fallback: Search sem pontos
+                        search_input = await self.page.wait_for_selector(
+                            'input[placeholder="Search"]',
+                            timeout=5000
+                        )
+
+            await search_input.click()  # Garante foco no campo
+            await asyncio.sleep(0.3)
             await search_input.fill(lead.username)
             await asyncio.sleep(2)
 
