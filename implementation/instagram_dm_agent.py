@@ -1207,12 +1207,19 @@ class InstagramDMAgent:
                 except:
                     pass
 
-            # Search for user
+            # Search for user - Instagram mudou placeholder de "Search..." para "Search"
             await asyncio.sleep(1)
-            search_input = await self.page.wait_for_selector(
-                'input[placeholder="Search..."]',
-                timeout=5000
-            )
+            try:
+                search_input = await self.page.wait_for_selector(
+                    'input[placeholder="Search"]',
+                    timeout=5000
+                )
+            except:
+                # Fallback para placeholder antigo
+                search_input = await self.page.wait_for_selector(
+                    'input[placeholder="Search..."]',
+                    timeout=5000
+                )
             await search_input.fill(lead.username)
             await asyncio.sleep(2)
 
