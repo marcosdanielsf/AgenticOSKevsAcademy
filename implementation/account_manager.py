@@ -23,6 +23,15 @@ load_dotenv()
 
 logger = logging.getLogger("AccountManager")
 
+# Import WarmupManager (optional - graceful fallback if not available)
+try:
+    from warmup_manager import WarmupManager, WarmupStage, WarmupStatus
+    WARMUP_AVAILABLE = True
+except ImportError:
+    WARMUP_AVAILABLE = False
+    WarmupManager = None
+    logger.info("WarmupManager não disponível - usando limites fixos")
+
 # Supabase config
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
@@ -43,6 +52,26 @@ class InstagramAccount:
     blocked_until: Optional[datetime]
     dms_sent_today: int = 0
     dms_sent_last_hour: int = 0
+    # Warmup fields
+    warmup_stage: Optional[str] = None
+    warmup_day: int = 0
+    warmup_ready: bool = True  # Default True para contas sem warmup
+
+    @property
+    def effective_daily_limit(self) -> int:
+        """Retorna limite diário considerando warmup"""
+        if WARMUP_AVAILABLE and not self.warmup_ready:
+            warmup = WarmupManager()
+            return warmup.get_daily_limit(self.id, self.username)
+        return self.daily_limit
+
+    @property
+    def effective_hourly_limit(self) -> int:
+        """Retorna limite por hora considerando warmup"""
+        if WARMUP_AVAILABLE and not self.warmup_ready:
+            warmup = WarmupManager()
+            return warmup.get_hourly_limit(self.id, self.username)
+        return self.hourly_limit
 
     @property
     def is_available(self) -> bool:
@@ -51,19 +80,19 @@ class InstagramAccount:
             return False
         if self.blocked_until and self.blocked_until > datetime.now():
             return False
-        if self.dms_sent_today >= self.daily_limit:
+        if self.dms_sent_today >= self.effective_daily_limit:
             return False
-        if self.dms_sent_last_hour >= self.hourly_limit:
+        if self.dms_sent_last_hour >= self.effective_hourly_limit:
             return False
         return True
 
     @property
     def remaining_today(self) -> int:
-        return max(0, self.daily_limit - self.dms_sent_today)
+        return max(0, self.effective_daily_limit - self.dms_sent_today)
 
     @property
     def remaining_this_hour(self) -> int:
-        return max(0, self.hourly_limit - self.dms_sent_last_hour)
+        return max(0, self.effective_hourly_limit - self.dms_sent_last_hour)
 
 
 class AccountManager:
@@ -122,6 +151,21 @@ class AccountManager:
                 # Get usage stats
                 stats = self._get_account_stats(row['username'])
 
+                # Get warmup status if available
+                warmup_stage = None
+                warmup_day = 0
+                warmup_ready = True
+
+                if WARMUP_AVAILABLE:
+                    try:
+                        warmup = WarmupManager()
+                        warmup_status = warmup.get_account_status(row['id'], row['username'])
+                        warmup_stage = warmup_status.stage.value
+                        warmup_day = warmup_status.current_day
+                        warmup_ready = warmup_status.is_ready
+                    except Exception as e:
+                        logger.warning(f"Erro ao buscar warmup para {row['username']}: {e}")
+
                 accounts.append(InstagramAccount(
                     id=row['id'],
                     tenant_id=row['tenant_id'],
@@ -134,7 +178,10 @@ class AccountManager:
                     last_used_at=datetime.fromisoformat(row['last_used_at']) if row.get('last_used_at') else None,
                     blocked_until=datetime.fromisoformat(row['blocked_until']) if row.get('blocked_until') else None,
                     dms_sent_today=stats.get('today', 0),
-                    dms_sent_last_hour=stats.get('last_hour', 0)
+                    dms_sent_last_hour=stats.get('last_hour', 0),
+                    warmup_stage=warmup_stage,
+                    warmup_day=warmup_day,
+                    warmup_ready=warmup_ready
                 ))
 
             return accounts
@@ -246,7 +293,7 @@ class AccountManager:
         except Exception as e:
             logger.error(f"Error recording usage: {e}")
 
-    def mark_blocked(self, account_id: int, hours: int = 24, reason: str = None):
+    def mark_blocked(self, account_id: int, hours: int = 24, reason: str = None, block_type: str = "unknown"):
         """Mark account as temporarily blocked"""
         try:
             blocked_until = datetime.now() + timedelta(hours=hours)
@@ -259,6 +306,15 @@ class AccountManager:
                 }
             )
             logger.warning(f"Account {account_id} blocked until {blocked_until}")
+
+            # Notificar WarmupManager sobre o bloqueio
+            if WARMUP_AVAILABLE:
+                try:
+                    warmup = WarmupManager()
+                    warmup.handle_block_detected(account_id, block_type)
+                except Exception as e:
+                    logger.warning(f"Erro ao notificar warmup sobre bloqueio: {e}")
+
         except Exception as e:
             logger.error(f"Error marking account blocked: {e}")
 
@@ -292,8 +348,22 @@ class AccountManager:
             logger.error(f"Error updating session: {e}")
 
     def create_account(self, tenant_id: str, username: str, session_id: str = None,
-                      daily_limit: int = 50, hourly_limit: int = 10) -> Optional[int]:
-        """Create a new Instagram account for a tenant"""
+                      daily_limit: int = 50, hourly_limit: int = 10,
+                      start_warmup: bool = True) -> Optional[int]:
+        """
+        Create a new Instagram account for a tenant.
+
+        Args:
+            tenant_id: ID do tenant
+            username: Username da conta
+            session_id: Session ID do Instagram
+            daily_limit: Limite diário máximo (após warmup)
+            hourly_limit: Limite por hora máximo (após warmup)
+            start_warmup: Se True, inicia warmup automaticamente (recomendado)
+
+        Returns:
+            ID da conta criada ou None
+        """
         try:
             result = self._request("POST", "instagram_accounts", data={
                 "tenant_id": tenant_id,
@@ -305,8 +375,19 @@ class AccountManager:
             })
 
             if result:
+                account_id = result[0]['id']
                 logger.info(f"Created account @{username} for tenant {tenant_id}")
-                return result[0]['id']
+
+                # Iniciar warmup automaticamente
+                if start_warmup and WARMUP_AVAILABLE:
+                    try:
+                        warmup = WarmupManager()
+                        warmup.start_warmup(account_id, username)
+                        logger.info(f"🔥 Warmup iniciado para @{username}")
+                    except Exception as e:
+                        logger.warning(f"Erro ao iniciar warmup: {e}")
+
+                return account_id
             return None
         except Exception as e:
             logger.error(f"Error creating account: {e}")
@@ -330,9 +411,18 @@ class AccountManager:
         active_accounts = len([a for a in accounts if a.status == 'active'])
         available_accounts = len([a for a in accounts if a.is_available])
 
-        total_daily_capacity = sum(a.daily_limit for a in accounts if a.status == 'active')
+        # Usar limites efetivos (considerando warmup)
+        total_daily_capacity = sum(a.effective_daily_limit for a in accounts if a.status == 'active')
         total_sent_today = sum(a.dms_sent_today for a in accounts)
         total_remaining_today = sum(a.remaining_today for a in accounts if a.is_available)
+
+        # Contagem por estágio de warmup
+        warmup_stats = {"new": 0, "warming": 0, "progressing": 0, "ready": 0}
+        for a in accounts:
+            if a.warmup_stage:
+                warmup_stats[a.warmup_stage] = warmup_stats.get(a.warmup_stage, 0) + 1
+            elif a.warmup_ready:
+                warmup_stats["ready"] += 1
 
         return {
             "tenant_id": tenant_id,
@@ -342,13 +432,18 @@ class AccountManager:
             "total_daily_capacity": total_daily_capacity,
             "total_sent_today": total_sent_today,
             "total_remaining_today": total_remaining_today,
+            "warmup_stats": warmup_stats,
             "accounts": [
                 {
                     "username": a.username,
                     "status": a.status,
                     "is_available": a.is_available,
                     "remaining_today": a.remaining_today,
-                    "remaining_this_hour": a.remaining_this_hour
+                    "remaining_this_hour": a.remaining_this_hour,
+                    "warmup_stage": a.warmup_stage,
+                    "warmup_day": a.warmup_day,
+                    "warmup_ready": a.warmup_ready,
+                    "effective_limit": a.effective_daily_limit
                 }
                 for a in accounts
             ]
@@ -398,7 +493,12 @@ class RoundRobinAccountRotator:
         else:
             logger.info(f"🔄 Round-robin: {len(self.accounts)} contas disponíveis")
             for acc in self.accounts:
-                logger.info(f"   @{acc.username}: {acc.remaining_today} DMs restantes hoje")
+                warmup_info = ""
+                if acc.warmup_stage and not acc.warmup_ready:
+                    warmup_info = f" [🔥 {acc.warmup_stage} dia {acc.warmup_day}]"
+                elif acc.warmup_ready:
+                    warmup_info = " [✅ ready]"
+                logger.info(f"   @{acc.username}: {acc.remaining_today}/{acc.effective_daily_limit} DMs{warmup_info}")
 
     def get_next_account(self) -> Optional[InstagramAccount]:
         """
