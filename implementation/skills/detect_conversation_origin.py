@@ -85,13 +85,13 @@ async def _search_conversation(contact_id: str, location_id: str, api_key: Optio
             return None
 
 
-async def _get_conversation_messages(conversation_id: str, limit: int = 50) -> List[Dict]:
+async def _get_conversation_messages(conversation_id: str, limit: int = 50, api_key: Optional[str] = None) -> List[Dict]:
     """
     Busca mensagens de uma conversa.
 
     API: GET /conversations/{conversationId}/messages
     """
-    headers = await _get_ghl_headers()
+    headers = _get_ghl_headers(api_key)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
@@ -113,13 +113,13 @@ async def _get_conversation_messages(conversation_id: str, limit: int = 50) -> L
             return []
 
 
-async def _add_tags_to_contact(contact_id: str, tags: List[str]) -> bool:
+async def _add_tags_to_contact(contact_id: str, tags: List[str], api_key: Optional[str] = None) -> bool:
     """
     Adiciona tags a um contato no GHL.
 
     API: POST /contacts/{contactId}/tags
     """
-    headers = await _get_ghl_headers()
+    headers = _get_ghl_headers(api_key)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
@@ -149,7 +149,8 @@ async def detect_conversation_origin(
     contact_id: str,
     location_id: str,
     auto_tag: bool = True,
-    channel_filter: Optional[str] = None  # "instagram", "whatsapp", etc.
+    channel_filter: Optional[str] = None,  # "instagram", "whatsapp", etc.
+    api_key: Optional[str] = None  # GHL API key (usa env var se não fornecida)
 ) -> Dict[str, Any]:
     """
     Detecta a origem de uma conversa analisando quem enviou a primeira mensagem.
@@ -159,20 +160,23 @@ async def detect_conversation_origin(
         location_id: ID da location no GHL
         auto_tag: Se True, adiciona tags automaticamente ao contato
         channel_filter: Filtrar por canal específico (opcional)
+        api_key: GHL API key (opcional, usa GHL_API_KEY do ambiente se não fornecida)
 
     Returns:
         Dict com origin ("outbound" ou "inbound"), detalhes da primeira mensagem,
         e tags adicionadas (se auto_tag=True)
     """
+    # Usa api_key do parâmetro ou do ambiente
+    effective_api_key = api_key or GHL_API_KEY
 
-    if not GHL_API_KEY:
+    if not effective_api_key:
         return {
             "origin": "unknown",
             "error": "GHL_API_KEY não configurada"
         }
 
     # 1. Buscar conversa do contato
-    conversation = await _search_conversation(contact_id, location_id)
+    conversation = await _search_conversation(contact_id, location_id, effective_api_key)
 
     if not conversation:
         return {
@@ -193,7 +197,7 @@ async def detect_conversation_origin(
         }
 
     # 2. Buscar mensagens da conversa
-    messages = await _get_conversation_messages(conversation_id, limit=100)
+    messages = await _get_conversation_messages(conversation_id, limit=100, api_key=effective_api_key)
 
     if not messages:
         return {
@@ -234,7 +238,7 @@ async def detect_conversation_origin(
     # 6. Auto-tagging se habilitado
     tags_added = []
     if auto_tag and tags_to_add:
-        success = await _add_tags_to_contact(contact_id, tags_to_add)
+        success = await _add_tags_to_contact(contact_id, tags_to_add, effective_api_key)
         if success:
             tags_added = tags_to_add
 
