@@ -172,7 +172,7 @@ DEPOIS: "Yuri, passei pelo seu perfil. Vi que você comanda mais de um negócio.
 
 ### P1 - Importante
 - [x] **Warm-up protocol manager** ✅ Commit: `8f5593c`
-- [x] **Proxy rotation infrastructure** ✅ (em andamento)
+- [x] **Proxy rotation infrastructure** ✅ Commit: `6f762b6` - COMPLETO
 - [ ] Instagram Private API extraction
 
 ---
@@ -242,6 +242,21 @@ INSERT INTO instagram_proxies (tenant_id, host, port, username, password, countr
 VALUES ('dr_alberto', 'br.smartproxy.com', 10000, 'user123', 'pass456', 'BR', true);
 ```
 3. Sistema usa proxy automaticamente ao iniciar browser
+
+### ✅ Proxy Configurado: Decodo (Smartproxy)
+
+**Credenciais configuradas no Supabase:**
+| Campo | Valor |
+|-------|-------|
+| tenant_id | `global` |
+| host | `gate.decodo.com` |
+| port | `10001` |
+| username | `spmqvj96vr` |
+| provider | `smartproxy` |
+| is_residential | `true` |
+
+**Status:** ✅ Testado e funcionando (302 response = conexão OK)
+**Plano:** 100MB trial (expandir para 2GB quando necessário)
 
 ### P2 - Infraestrutura
 - [ ] Stealth Browser MCP integration
