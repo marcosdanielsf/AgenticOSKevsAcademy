@@ -349,7 +349,7 @@ class AccountManager:
 
     def create_account(self, tenant_id: str, username: str, session_id: str = None,
                       daily_limit: int = 50, hourly_limit: int = 10,
-                      start_warmup: bool = True) -> Optional[int]:
+                      skip_warmup: bool = False) -> Optional[int]:
         """
         Create a new Instagram account for a tenant.
 
@@ -357,9 +357,17 @@ class AccountManager:
             tenant_id: ID do tenant
             username: Username da conta
             session_id: Session ID do Instagram
-            daily_limit: Limite diário máximo (após warmup)
-            hourly_limit: Limite por hora máximo (após warmup)
-            start_warmup: Se True, inicia warmup automaticamente (recomendado)
+            daily_limit: Limite diário máximo
+            hourly_limit: Limite por hora máximo
+            skip_warmup: Se True, marca conta como "ready" (conta madura que já existe)
+                         Se False, inicia warm-up de 15 dias (conta nova)
+
+        Examples:
+            # Conta nova de prospecção → precisa de warm-up
+            manager.create_account("mottivme", "prospector_novo")
+
+            # Conta do médico que já existe há anos → pula warm-up
+            manager.create_account("dr_alberto", "dr.alberto.cirurgiao", skip_warmup=True)
 
         Returns:
             ID da conta criada ou None
@@ -378,14 +386,19 @@ class AccountManager:
                 account_id = result[0]['id']
                 logger.info(f"Created account @{username} for tenant {tenant_id}")
 
-                # Iniciar warmup automaticamente
-                if start_warmup and WARMUP_AVAILABLE:
+                if WARMUP_AVAILABLE:
                     try:
                         warmup = WarmupManager()
-                        warmup.start_warmup(account_id, username)
-                        logger.info(f"🔥 Warmup iniciado para @{username}")
+                        if skip_warmup:
+                            # Conta madura - marca como ready direto
+                            warmup.mark_account_ready(account_id, username)
+                            logger.info(f"✅ @{username} marcada como ready (conta madura)")
+                        else:
+                            # Conta nova - inicia warm-up
+                            warmup.start_warmup(account_id, username)
+                            logger.info(f"🔥 Warmup iniciado para @{username} (15 dias)")
                     except Exception as e:
-                        logger.warning(f"Erro ao iniciar warmup: {e}")
+                        logger.warning(f"Erro ao configurar warmup: {e}")
 
                 return account_id
             return None

@@ -434,6 +434,71 @@ class WarmupManager:
         except Exception as e:
             logger.error(f"Erro ao marcar ready: {e}")
 
+    def mark_account_ready(self, account_id: int, username: str) -> WarmupStatus:
+        """
+        Marca conta como "ready" imediatamente (pula warm-up).
+
+        Use para contas maduras que já existem há muito tempo
+        e não precisam passar pelos 15 dias de aquecimento.
+
+        Args:
+            account_id: ID da conta no banco
+            username: Username da conta
+
+        Returns:
+            WarmupStatus com stage=READY
+        """
+        now = datetime.now()
+
+        try:
+            # Verifica se já existe registro
+            existing = self.get_account_warmup(account_id)
+
+            data = {
+                "warmup_started_at": (now - timedelta(days=30)).isoformat(),  # Simula 30 dias atrás
+                "stage": WarmupStage.READY.value,
+                "last_active_at": now.isoformat(),
+                "is_ready": True,
+                "notes": f"Conta madura - warmup pulado em {now.strftime('%Y-%m-%d')}"
+            }
+
+            if existing:
+                self._request("PATCH", "instagram_account_warmup",
+                    params={"account_id": f"eq.{account_id}"},
+                    data=data
+                )
+            else:
+                data["account_id"] = account_id
+                data["username"] = username
+                self._request("POST", "instagram_account_warmup", data=data)
+
+            logger.info(f"✅ @{username} marcada como ready (conta madura)")
+
+            return WarmupStatus(
+                account_id=account_id,
+                username=username,
+                stage=WarmupStage.READY,
+                started_at=now - timedelta(days=30),
+                current_day=30,
+                daily_limit=WARMUP_CONFIG[WarmupStage.READY]["daily_limit"],
+                is_ready=True,
+                last_active_at=now,
+                notes="Conta madura - warmup pulado"
+            )
+
+        except Exception as e:
+            logger.error(f"Erro ao marcar conta como ready: {e}")
+            return WarmupStatus(
+                account_id=account_id,
+                username=username,
+                stage=WarmupStage.READY,
+                started_at=now,
+                current_day=30,
+                daily_limit=WARMUP_CONFIG[WarmupStage.READY]["daily_limit"],
+                is_ready=True,
+                last_active_at=now
+            )
+
     def _update_last_active(self, account_id: int):
         """Atualiza timestamp de última atividade"""
         try:
