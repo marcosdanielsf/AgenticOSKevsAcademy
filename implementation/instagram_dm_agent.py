@@ -30,6 +30,14 @@ from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 from dotenv import load_dotenv
 import requests
 
+# Stealth mode para evitar detecção de automação
+try:
+    from playwright_stealth import stealth_async
+    STEALTH_AVAILABLE = True
+except ImportError:
+    STEALTH_AVAILABLE = False
+    stealth_async = None
+
 # Import scraping and scoring modules
 try:
     # Use Gemini Vision scraper (screenshot + AI) - FREE with Gemini 1.5 Flash!
@@ -804,6 +812,11 @@ class InstagramDMAgent:
 
         self.context = await self.browser.new_context(**context_options)
         self.page = await self.context.new_page()
+
+        # Apply stealth mode to avoid detection
+        if STEALTH_AVAILABLE and stealth_async:
+            await stealth_async(self.page)
+            logger.info("   🥷 Stealth mode ENABLED (anti-detection)")
 
         # Set extra headers
         await self.page.set_extra_http_headers({

@@ -13,6 +13,7 @@ dataclasses-json>=0.6.0
 
 # Browser Automation (Instagram DM Agent)
 playwright>=1.40.0
+playwright-stealth>=1.0.6  # Anti-detection para automação
 
 # Database
 psycopg2-binary>=2.9.9
