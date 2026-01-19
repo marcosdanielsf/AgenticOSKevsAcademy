@@ -1,7 +1,7 @@
 # AgenticOS - Lista de Tarefas
 
-> **Atualizado em:** 2026-01-17 (15:00)
-> **Status:** Spintax Híbrido + Clone System SOP implementados
+> **Atualizado em:** 2026-01-19 (manhã)
+> **Status:** Block Detection implementado ✅
 > **Leia este arquivo apos reset de memoria para saber onde parou**
 
 ---
@@ -95,11 +95,51 @@
 
 ---
 
+## Sessão 2026-01-19 - BLOCK DETECTION ✅
+
+### ✅ Concluído: Sistema de Detecção de Bloqueio
+
+- [x] **BlockType enum** com tipos de bloqueio:
+  - `checkpoint` - Verificação do Instagram
+  - `action_blocked` - Ação temporariamente bloqueada
+  - `rate_limited` - Limite de taxa
+  - `account_disabled` - Conta desabilitada
+  - `suspicious_activity` - Atividade suspeita
+  - `two_factor` - Desafio 2FA
+
+- [x] **BlockDetectionResult dataclass**
+  - `is_blocked`, `block_type`, `message`
+  - `should_stop_campaign` property (bloqueios críticos)
+  - `should_switch_account` property (para multi-conta)
+
+- [x] **Método `check_for_block()`**
+  - Detecção por URL (checkpoint, challenge, two_factor)
+  - Detecção por conteúdo da página
+  - Detecção em dialogs/popups
+  - Screenshot automático em bloqueio
+
+- [x] **Atualizado `send_dm()`**
+  - Verifica bloqueio antes de enviar
+  - Verifica bloqueio após enviar
+  - Retorna erro no formato `BLOCKED:type:message`
+
+- [x] **Atualizado `run_campaign()`**
+  - Para campanha em bloqueios críticos
+  - Aguarda 5min em rate limit
+
+- [x] **Atualizado `run_campaign_kevs()`**
+  - Remove conta bloqueada da rotação
+  - Para se TODAS as contas bloqueadas
+
+### Commit: `076b09e`
+
+---
+
 ## PRÓXIMA SESSÃO - Implementações Pendentes
 
 ### P0 - Urgente
-- [ ] Block detection no `instagram_dm_agent.py`
 - [ ] Testar spintax híbrido em campanha real
+- [ ] Testar block detection em campanha real
 
 ### P1 - Importante
 - [ ] Warm-up protocol manager
