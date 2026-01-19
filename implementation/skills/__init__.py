@@ -149,6 +149,7 @@ try:
     from . import sync_lead
     from . import update_ghl_contact
     from . import get_lead_by_channel
+    from . import detect_conversation_origin
     logger.info(f"[REGISTRY] {len(SkillRegistry._skills)} skills carregados")
 except ImportError as e:
     logger.warning(f"[REGISTRY] Erro ao carregar skills: {e}")

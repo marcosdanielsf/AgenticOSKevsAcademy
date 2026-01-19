@@ -3693,6 +3693,99 @@ Responda APENAS com o formato JSON:
         )
 
 
+# ============================================
+# DETECT CONVERSATION ORIGIN - Paliativo BDR Manual
+# ============================================
+
+class ConversationOriginRequest(BaseModel):
+    """Request para detectar origem da conversa"""
+    contact_id: str
+    location_id: str
+    auto_tag: bool = True  # Adiciona tags automaticamente
+    channel_filter: Optional[str] = None  # "instagram", "whatsapp", etc.
+
+class ConversationOriginResponse(BaseModel):
+    """Response da detecção de origem"""
+    origin: str  # "outbound", "inbound", "unknown"
+    origin_label: str
+    first_message_direction: Optional[str] = None
+    first_message_date: Optional[str] = None
+    first_message_preview: Optional[str] = None
+    conversation_id: Optional[str] = None
+    conversation_type: Optional[str] = None
+    total_messages: Optional[int] = None
+    tags_added: List[str] = []
+    contact_id: str
+    agent_context: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+@app.post("/api/detect-conversation-origin", response_model=ConversationOriginResponse)
+async def detect_conversation_origin_endpoint(request: ConversationOriginRequest):
+    """
+    PALIATIVO: Detecta se conversa foi iniciada por BDR (outbound) ou Lead (inbound).
+
+    Analisa a PRIMEIRA mensagem da conversa no GHL para determinar quem iniciou.
+
+    Usado pelo n8n para classificar leads quando BDR prospecta manualmente:
+    - Se primeira msg foi da empresa → outbound → tags: outbound-instagram, bdr-abordou
+    - Se primeira msg foi do lead → inbound → tags: novo-seguidor, inbound-organico
+
+    Exemplo de uso no n8n:
+    ```
+    POST https://agenticoskevsacademy-production.up.railway.app/api/detect-conversation-origin
+    {
+        "contact_id": "{{$json.contact_id}}",
+        "location_id": "{{$json.location_id}}",
+        "auto_tag": true,
+        "channel_filter": "instagram"
+    }
+    ```
+
+    Response:
+    - origin: "outbound" | "inbound" | "unknown"
+    - agent_context.should_activate: true (sempre ativa qualificação)
+    - agent_context.context_type: "prospecting_response" | "inbound_organic"
+    """
+    logger.info(f"Detecting conversation origin for contact {request.contact_id}")
+
+    try:
+        from skills.detect_conversation_origin import detect_conversation_origin
+
+        result = await detect_conversation_origin(
+            contact_id=request.contact_id,
+            location_id=request.location_id,
+            auto_tag=request.auto_tag,
+            channel_filter=request.channel_filter
+        )
+
+        # Extrair data do wrapper do skill
+        data = result.get("data", result)
+
+        return ConversationOriginResponse(
+            origin=data.get("origin", "unknown"),
+            origin_label=data.get("origin_label", ""),
+            first_message_direction=data.get("first_message_direction"),
+            first_message_date=data.get("first_message_date"),
+            first_message_preview=data.get("first_message_preview"),
+            conversation_id=data.get("conversation_id"),
+            conversation_type=data.get("conversation_type"),
+            total_messages=data.get("total_messages"),
+            tags_added=data.get("tags_added", []),
+            contact_id=request.contact_id,
+            agent_context=data.get("agent_context"),
+            error=data.get("error")
+        )
+
+    except Exception as e:
+        logger.error(f"Error detecting conversation origin: {e}", exc_info=True)
+        return ConversationOriginResponse(
+            origin="unknown",
+            origin_label="Erro na detecção",
+            contact_id=request.contact_id,
+            error=str(e)
+        )
+
+
 @app.get("/api/health")
 async def api_health_check():
     """

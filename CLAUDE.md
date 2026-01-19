@@ -76,6 +76,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |----------|-------|--------|-------------|
 | `/api/match-lead-context` | 2560 | Busca lead no Supabase | n8n |
 | `/api/analyze-conversation-context` | 3155 | Decide se ativa IA | n8n |
+| `/api/detect-conversation-origin` | ~3700 | **PALIATIVO:** Detecta se BDR ou Lead iniciou | n8n |
 | `/api/auto-enrich-lead` | 2945 | Scrape + salva perfil | n8n |
 | `/webhook/classify-lead` | ~1800 | Classifica com Gemini | n8n |
 | `/webhook/rag-search` | ~3400 | Busca semântica | Claude |
@@ -95,6 +96,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Fluxo de Prospecção
 
+### Fluxo A: AgenticOS (Automático)
 ```
 1. PROSPECTOR (instagram_dm_agent.py)
    └─> Scrape leads → agentic_instagram_leads
@@ -110,6 +112,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    └─> Chama /api/analyze-conversation-context
    └─> Adiciona tag "lead-prospectado-ia" no GHL
    └─> Classifica e responde
+```
+
+### Fluxo B: BDR Manual (PALIATIVO - 2026-01-19)
+```
+1. BDR prospecta manualmente no Instagram
+   └─> Envia DM para lead (não passa pelo AgenticOS)
+
+2. LEAD RESPONDE ou NOVO SEGUIDOR manda DM (via GHL)
+   └─> Webhook dispara n8n
+
+3. N8N (Novo nó ANTES do SDR Julia)
+   └─> Chama /api/detect-conversation-origin
+   └─> Resposta indica:
+       - origin: "outbound" → BDR abordou (tags: outbound-instagram, bdr-abordou)
+       - origin: "inbound" → Lead/seguidor iniciou (tags: novo-seguidor, inbound-organico)
+   └─> agent_context.context_type define tom do agente
+
+4. N8N continua fluxo normal
+   └─> Chama /api/analyze-conversation-context (já com tags corretas)
+   └─> Ativa agente social_seller_instagram
 ```
 
 ## ⚠️ BUGS CONHECIDOS
