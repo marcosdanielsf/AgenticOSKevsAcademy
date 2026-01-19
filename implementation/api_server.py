@@ -3223,7 +3223,48 @@ async def match_lead_context(request: MatchLeadContextRequest):
         # Remover placeholders vazios
         placeholders = {k: v for k, v in placeholders.items() if v}
 
-        logger.info(f"Match encontrado! source={match_source}, lead_id={lead_data.get('id')}")
+        # ============================================
+        # MARCAR COMO RESPONDED SE FOI PROSPECTADO
+        # ============================================
+        # Se o lead foi prospectado pelo AgenticOS e está respondendo agora,
+        # atualizar o status na tabela new_followers_detected
+        if was_prospected:
+            ig_username = lead_data.get("instagram_username", "").lstrip("@")
+            if ig_username:
+                try:
+                    # Buscar o follower na tabela new_followers_detected
+                    response = requests.get(
+                        f"{db.base_url}/new_followers_detected",
+                        headers=db.headers,
+                        params={
+                            "follower_username": f"eq.{ig_username}",
+                            "outreach_status": "eq.sent",
+                            "limit": 1
+                        }
+                    )
+                    if response.status_code == 200:
+                        followers = response.json()
+                        if followers:
+                            follower_id = followers[0].get("id")
+                            # Atualizar para responded
+                            update_response = requests.patch(
+                                f"{db.base_url}/new_followers_detected",
+                                headers=db.headers,
+                                params={"id": f"eq.{follower_id}"},
+                                json={
+                                    "outreach_status": "responded",
+                                    "outreach_responded_at": datetime.now().isoformat(),
+                                    "updated_at": datetime.now().isoformat()
+                                }
+                            )
+                            if update_response.status_code in [200, 204]:
+                                logger.info(f"✅ Follower {ig_username} marcado como RESPONDED (id={follower_id})")
+                            else:
+                                logger.warning(f"Falha ao atualizar follower {follower_id}: {update_response.text}")
+                except Exception as e:
+                    logger.warning(f"Erro ao marcar follower como responded: {e}")
+
+        logger.info(f"Match encontrado! source={match_source}, lead_id={lead_data.get('id')}, was_prospected={was_prospected}")
 
         return MatchLeadContextResponse(
             matched=True,
