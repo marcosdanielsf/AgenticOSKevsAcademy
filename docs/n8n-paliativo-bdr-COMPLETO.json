@@ -1,0 +1,417 @@
+{
+  "name": "PALIATIVO - Detectar Origem BDR/Seguidor",
+  "meta": {
+    "instanceId": "paliativo-bdr-manual-2026-01-19",
+    "description": "Bloco de nós para detectar origem da conversa (BDR outbound ou novo seguidor inbound). Importar e conectar ao nó Info."
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-primeira-mensagem",
+              "leftValue": "={{ $('Info').first().json.is_primeira_mensagem }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        32000,
+        24600
+      ],
+      "id": "if-primeira-msg-001",
+      "name": "É Primeira Mensagem?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticoskevsacademy-production.up.railway.app/api/detect-conversation-origin",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contact_id\": \"{{ $('Info').first().json.lead_id }}\",\n  \"location_id\": \"{{ $('Info').first().json.location_id }}\",\n  \"auto_tag\": true,\n  \"channel_filter\": \"instagram\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        32300,
+        24500
+      ],
+      "id": "detect-origin-001",
+      "name": "Detectar Origem (BDR ou Seguidor)",
+      "notesInFlow": true,
+      "notes": "Só roda na 1ª mensagem. Detecta se BDR abordou ou lead iniciou. Auto-adiciona tags.",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.data.origin }}",
+                    "rightValue": "outbound",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "origin-outbound"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "BDR Abordou"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.data.origin }}",
+                    "rightValue": "inbound",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "origin-inbound"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Novo Seguidor"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        32600,
+        24500
+      ],
+      "id": "switch-origin-001",
+      "name": "Origem da Conversa",
+      "notesInFlow": true,
+      "notes": "BDR = outbound | Seguidor = inbound"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ctx-type-001",
+              "name": "context_type",
+              "value": "prospecting_response",
+              "type": "string"
+            },
+            {
+              "id": "ctx-tom-001",
+              "name": "tom_agente",
+              "value": "direto, dar continuidade à abordagem inicial",
+              "type": "string"
+            },
+            {
+              "id": "ctx-origin-001",
+              "name": "origem_conversa",
+              "value": "outbound",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        32900,
+        24400
+      ],
+      "id": "set-context-bdr-001",
+      "name": "Contexto: BDR Abordou"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ctx-type-002",
+              "name": "context_type",
+              "value": "inbound_organic",
+              "type": "string"
+            },
+            {
+              "id": "ctx-tom-002",
+              "name": "tom_agente",
+              "value": "receptivo, qualificar interesse",
+              "type": "string"
+            },
+            {
+              "id": "ctx-origin-002",
+              "name": "origem_conversa",
+              "value": "inbound",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        32900,
+        24600
+      ],
+      "id": "set-context-seguidor-001",
+      "name": "Contexto: Novo Seguidor"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticoskevsacademy-production.up.railway.app/api/analyze-conversation-context",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contact_id\": \"{{ $('Info').first().json.lead_id || '' }}\",\n  \"location_id\": \"{{ $('Info').first().json.location_id || '' }}\",\n  \"current_message\": \"{{ $('Mensagem recebida').first().json.body?.message?.body || $('Mensagem recebida').first().json.body?.lastMessage?.body || '' }}\",\n  \"contact_tags\": {{ JSON.stringify(($('Mensagem recebida').first().json.body?.tags || '').split(',').filter(t => t.trim())) }},\n  \"last_message_direction\": \"{{ $('Mensagem recebida').first().json.body?.lastMessage?.direction || 'inbound' }}\",\n  \"conversation_count\": {{ $('Mensagem recebida').first().json.body?.conversationCount || 1 }}\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        32300,
+        24800
+      ],
+      "id": "analyze-context-001",
+      "name": "Analisar Contexto Conversa",
+      "notesInFlow": true,
+      "onError": "continueRegularOutput",
+      "notes": "Msgs seguintes: analisa tags existentes e decide se ativa IA"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.should_activate_ia }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    },
+                    "id": "should-activate-true"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Ativar IA"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.should_activate_ia }}",
+                    "rightValue": false,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    },
+                    "id": "should-activate-false"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Não Ativar"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        32600,
+        24800
+      ],
+      "id": "switch-context-001",
+      "name": "Decisão de Contexto"
+    },
+    {
+      "parameters": {
+        "content": "## 🎯 PALIATIVO: Detectar Origem da Conversa\n**Data:** 2026-01-19\n\n### Fluxo:\n```\n[Info]\n   │\n   ▼\n[É Primeira Mensagem?]\n   │\n   ├── TRUE ──► [Detectar Origem]\n   │                 │\n   │                 ▼\n   │            [Switch: BDR ou Seguidor]\n   │                 │\n   │            ┌────┴────┐\n   │            ▼         ▼\n   │         [BDR]    [Seguidor]\n   │            │         │\n   │            └────┬────┘\n   │                 │\n   │                 ▼\n   │           [Veio de Tráfego?]\n   │\n   └── FALSE ──► [Analisar Contexto]\n                      │\n                      ▼\n                 [Decisão: Ativar IA?]\n```\n\n### Tags adicionadas (auto):\n- **Outbound:** `outbound-instagram`, `bdr-abordou`, `prospectado`\n- **Inbound:** `novo-seguidor`, `inbound-organico`, `lead-iniciou`",
+        "height": 560,
+        "width": 420,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        31500,
+        24300
+      ],
+      "id": "sticky-paliativo-001",
+      "name": "Nota: Paliativo BDR"
+    }
+  ],
+  "connections": {
+    "É Primeira Mensagem?": {
+      "main": [
+        [
+          {
+            "node": "Detectar Origem (BDR ou Seguidor)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Analisar Contexto Conversa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detectar Origem (BDR ou Seguidor)": {
+      "main": [
+        [
+          {
+            "node": "Origem da Conversa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Origem da Conversa": {
+      "main": [
+        [
+          {
+            "node": "Contexto: BDR Abordou",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Contexto: Novo Seguidor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contexto: BDR Abordou": {
+      "main": [
+        [
+          {
+            "node": "Veio de Tráfego?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contexto: Novo Seguidor": {
+      "main": [
+        [
+          {
+            "node": "Veio de Tráfego?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analisar Contexto Conversa": {
+      "main": [
+        [
+          {
+            "node": "Decisão de Contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}

@@ -1,0 +1,229 @@
+{
+  "meta": {
+    "instanceId": "paliativo-bdr-manual-2026-01-19"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://agenticoskevsacademy-production.up.railway.app/api/detect-conversation-origin",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contact_id\": \"{{ $('Info').first().json.lead_id }}\",\n  \"location_id\": \"{{ $('Info').first().json.location_id }}\",\n  \"auto_tag\": true,\n  \"channel_filter\": \"instagram\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        32100,
+        25200
+      ],
+      "id": "detect-origin-001",
+      "name": "Detectar Origem (BDR ou Seguidor)",
+      "notesInFlow": true,
+      "notes": "PALIATIVO: Detecta se conversa foi iniciada por BDR (outbound) ou Lead (inbound). Auto-adiciona tags.",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.data.origin }}",
+                    "rightValue": "outbound",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "origin-outbound"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "BDR Abordou"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.data.origin }}",
+                    "rightValue": "inbound",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "origin-inbound"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Novo Seguidor"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        32400,
+        25200
+      ],
+      "id": "switch-origin-001",
+      "name": "Origem da Conversa",
+      "notesInFlow": true,
+      "notes": "BDR Abordou = prospecção ativa | Novo Seguidor = lead orgânico"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ctx-type-001",
+              "name": "context_type",
+              "value": "prospecting_response",
+              "type": "string"
+            },
+            {
+              "id": "ctx-tom-001",
+              "name": "tom_agente",
+              "value": "direto, dar continuidade à abordagem inicial",
+              "type": "string"
+            },
+            {
+              "id": "ctx-origin-001",
+              "name": "origem_conversa",
+              "value": "outbound",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        32700,
+        25100
+      ],
+      "id": "set-context-bdr-001",
+      "name": "Contexto: BDR Abordou"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ctx-type-002",
+              "name": "context_type",
+              "value": "inbound_organic",
+              "type": "string"
+            },
+            {
+              "id": "ctx-tom-002",
+              "name": "tom_agente",
+              "value": "receptivo, qualificar interesse",
+              "type": "string"
+            },
+            {
+              "id": "ctx-origin-002",
+              "name": "origem_conversa",
+              "value": "inbound",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        32700,
+        25300
+      ],
+      "id": "set-context-seguidor-001",
+      "name": "Contexto: Novo Seguidor"
+    },
+    {
+      "parameters": {
+        "content": "## PALIATIVO: Detectar Origem da Conversa\n\n**Propósito:** Identificar se a conversa foi iniciada pelo BDR (outbound) ou pelo Lead (inbound/novo seguidor).\n\n**Fluxo:**\n1. Chama Railway `/api/detect-conversation-origin`\n2. API analisa primeira mensagem da conversa no GHL\n3. Se primeira msg foi outbound → BDR abordou\n4. Se primeira msg foi inbound → Novo seguidor\n5. Tags são adicionadas automaticamente\n\n**Tags adicionadas:**\n- Outbound: `outbound-instagram`, `bdr-abordou`, `prospectado`\n- Inbound: `novo-seguidor`, `inbound-organico`, `lead-iniciou`\n\n**Data:** 2026-01-19",
+        "height": 400,
+        "width": 500,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        31800,
+        24800
+      ],
+      "id": "sticky-detect-origin-001",
+      "name": "Nota: Detectar Origem"
+    }
+  ],
+  "connections": {
+    "Detectar Origem (BDR ou Seguidor)": {
+      "main": [
+        [
+          {
+            "node": "Origem da Conversa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Origem da Conversa": {
+      "main": [
+        [
+          {
+            "node": "Contexto: BDR Abordou",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Contexto: Novo Seguidor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

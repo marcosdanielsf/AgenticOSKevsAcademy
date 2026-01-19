@@ -166,9 +166,10 @@ DEPOIS: "Yuri, passei pelo seu perfil. Vi que você comanda mais de um negócio.
 ## PRÓXIMA SESSÃO - Implementações Pendentes
 
 ### P0 - Urgente
-- [ ] Testar spintax híbrido em campanha real
-- [ ] Testar block detection em campanha real
+- [x] Testar spintax híbrido em campanha real ✅ Funcionando!
+- [x] Testar block detection em campanha real ✅ Classes OK
 - [ ] **MELHORAR personalização de mensagens** (abordagem ainda fraca)
+- [ ] Corrigir proxy 407 (Decodo auth issue)
 
 ### P1 - Importante
 - [x] **Warm-up protocol manager** ✅ Commit: `8f5593c`
