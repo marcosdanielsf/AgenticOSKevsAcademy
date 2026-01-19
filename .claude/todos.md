@@ -168,8 +168,8 @@ DEPOIS: "Yuri, passei pelo seu perfil. Vi que você comanda mais de um negócio.
 ### P0 - Urgente
 - [x] Testar spintax híbrido em campanha real ✅ Funcionando!
 - [x] Testar block detection em campanha real ✅ Classes OK
+- [x] Corrigir proxy 407 ✅ Plano pago Decodo ativado!
 - [ ] **MELHORAR personalização de mensagens** (abordagem ainda fraca)
-- [ ] Corrigir proxy 407 (Decodo auth issue)
 
 ### P1 - Importante
 - [x] **Warm-up protocol manager** ✅ Commit: `8f5593c`
@@ -256,8 +256,15 @@ VALUES ('dr_alberto', 'br.smartproxy.com', 10000, 'user123', 'pass456', 'BR', tr
 | provider | `smartproxy` |
 | is_residential | `true` |
 
-**Status:** ✅ Testado e funcionando (302 response = conexão OK)
-**Plano:** 100MB trial (expandir para 2GB quando necessário)
+**Status:** ✅ FUNCIONANDO COM PLANO PAGO
+**Plano:** 2GB pago - ativado em 2026-01-19
+
+### Teste Final com Proxy (2026-01-19 17:49)
+```
+🌐 Proxy: gate.decodo.com:10001 (BR)
+✅ DM sent to @mariane.psiquiatra
+Success Rate: 100.0%
+```
 
 ### P2 - Infraestrutura
 - [ ] Stealth Browser MCP integration
