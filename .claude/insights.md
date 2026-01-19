@@ -1,7 +1,86 @@
 # AgenticOS - Insights e Decisoes
 
-> **Atualizado em:** 2026-01-16
+> **Atualizado em:** 2026-01-19
+> **Status:** SISTEMA COMPLETO - Segurança 8/10
 > Conhecimento acumulado durante o desenvolvimento
+
+---
+
+## Sessão 2026-01-19 - SISTEMA DE SEGURANÇA COMPLETO
+
+### Arquitetura de Segurança em Camadas (8/10)
+
+| Camada | Componente | Arquivo | Função |
+|--------|------------|---------|--------|
+| 1. Rede | Proxy Decodo | `proxy_manager.py` | IP residencial brasileiro |
+| 2. Browser | Playwright Stealth | `instagram_dm_agent.py` | Oculta automação |
+| 3. Comportamento | Warm-up Protocol | `warmup_manager.py` | Limites graduais |
+| 4. Detecção | Block Detection | `instagram_dm_agent.py` | 8 tipos de bloqueio |
+
+### Insight: Proxy Trial vs Pago
+
+**Problema:** HTTP 407 (Authentication Required) com trial Decodo
+**Causa:** Trial tem limite de requisições/conexões
+**Solução:** Plano pago $6/mês (2GB) - funciona imediatamente
+
+### Insight: Seletores Instagram Mudam Frequentemente
+
+**Problema:** `input[placeholder="Search..."]` não encontrado
+**Causa:** Instagram mudou placeholder de "Search..." para "Search"
+**Solução:** Usar múltiplos fallbacks:
+```python
+selectors = [
+    'div[role="dialog"] input[name="queryBox"]',
+    'div[role="dialog"] input[placeholder="Search..."]',
+    'div[role="dialog"] input[placeholder="Search"]',
+]
+```
+
+### Insight: Modal vs Background
+
+**Problema:** Código digitava no campo errado (atrás do modal)
+**Causa:** Seletor pegava campo do background, não do dialog
+**Solução:** Sempre prefixar com `div[role="dialog"]`
+
+### Configuração Final do Proxy (Supabase)
+
+```sql
+INSERT INTO instagram_proxies (
+    tenant_id, name, host, port, username, password,
+    proxy_type, provider, country, is_residential
+) VALUES (
+    'global', 'Decodo BR', 'gate.decodo.com', 10001,
+    'spmqvj96vr', '<password>', 'http', 'smartproxy', 'BR', true
+);
+```
+
+### Configuração Playwright Stealth
+
+```python
+# requirements.txt
+playwright-stealth>=1.0.6
+
+# instagram_dm_agent.py
+try:
+    from playwright_stealth import stealth_async
+    STEALTH_AVAILABLE = True
+except ImportError:
+    STEALTH_AVAILABLE = False
+
+# Após criar página:
+if STEALTH_AVAILABLE:
+    await stealth_async(self.page)
+    logger.info("🥷 Stealth mode ENABLED")
+```
+
+### Commits Importantes (2026-01-19)
+
+| Commit | Descrição |
+|--------|-----------|
+| `a76945f` | feat: playwright-stealth anti-detection |
+| `8f5593c` | feat: warm-up protocol manager |
+| `6f762b6` | feat: proxy rotation infrastructure |
+| `076b09e` | feat: block detection system |
 
 ---
 
