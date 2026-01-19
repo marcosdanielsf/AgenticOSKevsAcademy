@@ -37,22 +37,23 @@ GHL_API_URL = "https://services.leadconnectorhq.com"
 GHL_API_KEY = os.getenv("GHL_API_KEY") or os.getenv("GHL_ACCESS_TOKEN")
 
 
-async def _get_ghl_headers() -> Dict[str, str]:
+def _get_ghl_headers(api_key: Optional[str] = None) -> Dict[str, str]:
     """Headers para API GHL v2."""
+    key = api_key or GHL_API_KEY
     return {
-        "Authorization": f"Bearer {GHL_API_KEY}",
+        "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
         "Version": "2021-07-28"
     }
 
 
-async def _search_conversation(contact_id: str, location_id: str) -> Optional[Dict]:
+async def _search_conversation(contact_id: str, location_id: str, api_key: Optional[str] = None) -> Optional[Dict]:
     """
     Busca a conversa de um contato no GHL.
 
     API: GET /conversations/search?contactId={contact_id}&locationId={location_id}
     """
-    headers = await _get_ghl_headers()
+    headers = _get_ghl_headers(api_key)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:

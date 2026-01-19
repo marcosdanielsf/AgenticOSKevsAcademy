@@ -37,8 +37,8 @@ async def test_proxy():
         from proxy_manager import ProxyManager
         pm = ProxyManager()
 
-        # Buscar proxy global
-        proxy = await pm.get_proxy_for_tenant('global')
+        # Buscar proxy global (método síncrono, não precisa de await)
+        proxy = pm.get_proxy_for_tenant('global')
         if proxy:
             logger.info(f"✅ Proxy encontrado: {proxy.host}:{proxy.port}")
             logger.info(f"   Provider: {proxy.provider}")

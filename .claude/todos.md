@@ -267,8 +267,51 @@ Success Rate: 100.0%
 ```
 
 ### P2 - Infraestrutura
-- [ ] Stealth Browser MCP integration
+- [x] **Playwright Stealth implementado** ✅ Commit: `a76945f`
 - [ ] Redis para rate limiting distribuído
+
+---
+
+## Sessão 2026-01-19 - PLAYWRIGHT STEALTH ✅
+
+### ✅ Concluído: Anti-Detection com Stealth Mode
+
+**Arquivos modificados:**
+- `requirements.txt` - Adicionado `playwright-stealth>=1.0.6`
+- `implementation/instagram_dm_agent.py` - Import e aplicação do stealth
+
+**Código implementado:**
+```python
+# Import condicional
+try:
+    from playwright_stealth import stealth_async
+    STEALTH_AVAILABLE = True
+except ImportError:
+    STEALTH_AVAILABLE = False
+    stealth_async = None
+
+# Aplicação após criar página
+self.page = await self.context.new_page()
+if STEALTH_AVAILABLE and stealth_async:
+    await stealth_async(self.page)
+    logger.info("   🥷 Stealth mode ENABLED (anti-detection)")
+```
+
+**Funcionalidades:**
+- Oculta `navigator.webdriver`
+- Randomiza fingerprint do navegador
+- Mascara padrões de automação do Playwright
+- Bypass básico de detecção do Instagram
+
+**Nível de Segurança:** 8/10 (era 7/10 sem stealth)
+
+**Status:** ⏳ Aguardando reset do limite horário para testar
+- Limite atual: 10/10 DMs (warm-up stage WARMING)
+- Próximo reset: ~1 hora após último DM
+
+### Pendências
+- [ ] Verificar log "🥷 Stealth mode ENABLED" no próximo teste
+- [ ] Monitorar se Instagram detecta menos atividade suspeita
 
 ---
 

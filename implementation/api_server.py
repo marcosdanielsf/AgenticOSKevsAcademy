@@ -3703,6 +3703,7 @@ class ConversationOriginRequest(BaseModel):
     location_id: str
     auto_tag: bool = True  # Adiciona tags automaticamente
     channel_filter: Optional[str] = None  # "instagram", "whatsapp", etc.
+    api_key: Optional[str] = None  # GHL API key (opcional, usa env var se não fornecida)
 
 class ConversationOriginResponse(BaseModel):
     """Response da detecção de origem"""
@@ -3755,7 +3756,8 @@ async def detect_conversation_origin_endpoint(request: ConversationOriginRequest
             contact_id=request.contact_id,
             location_id=request.location_id,
             auto_tag=request.auto_tag,
-            channel_filter=request.channel_filter
+            channel_filter=request.channel_filter,
+            api_key=request.api_key
         )
 
         # Extrair data do wrapper do skill
