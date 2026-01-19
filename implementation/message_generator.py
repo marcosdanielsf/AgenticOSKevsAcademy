@@ -122,8 +122,9 @@ class MessageGenerator:
     # ===========================================
 
     # Templates ULTRA personalizados (score >= 70 + profissão)
+    # Foco no bio_hook específico, sem usar {profession} genérico
     ULTRA_PERSONALIZED_TEMPLATES = [
-        """{first_name}, vi que você trabalha com {profession}.
+        """{first_name}, passei pelo seu perfil.
 
 {bio_hook}
 
@@ -149,6 +150,7 @@ Me conta uma coisa: como tá a captação de clientes hoje?"""
     ]
 
     # Templates personalizados (score >= 50)
+    # Foco no bio_hook específico, evitar {profession} genérico
     PERSONALIZED_TEMPLATES = [
         """{first_name}, vi seu perfil.
 
@@ -166,20 +168,21 @@ Faz sentido trocar uma ideia sobre isso?""",
 
 {bio_hook}
 
-Posso te mandar um áudio de 1 min explicando algo?""",
+Posso te mandar um áudio de 1 min?""",
 
         """{first_name}
 
 {bio_hook}
 
-Teria interesse em saber como alguns {profession}s estão resolvendo isso?"""
+Teria interesse em saber como outros profissionais da área estão resolvendo isso?"""
     ]
 
-    # Templates padrão (score < 50) - ainda curtos e curiosos
+    # Templates padrão (score < 50) - curtos e curiosos
+    # Evitar {profession} genérico, usar bio_hook quando disponível
     STANDARD_TEMPLATES = [
         """{first_name}, tudo bem?
 
-Vi seu perfil e achei interessante.
+{bio_hook}
 
 Posso te fazer uma pergunta?""",
 
@@ -197,9 +200,9 @@ Posso te contar algo que talvez te interesse?""",
 
         """{first_name}, beleza?
 
-Vi que você é {profession}.
+{bio_hook}
 
-Me conta: como tá a demanda de clientes hoje?"""
+Como tá a demanda de clientes hoje?"""
     ]
 
     # ===========================================
@@ -207,67 +210,67 @@ Me conta: como tá a demanda de clientes hoje?"""
     # Curtos, específicos, geram curiosidade
     # ===========================================
 
-    # Hooks baseados em profissão (curtos e curiosos)
+    # Hooks baseados em profissão - estilo Charlie Morgan (curtos, curiosos, específicos)
     PROFESSION_HOOKS = {
         'médico': [
-            "Notei que você atende particular.",
-            "Vi que você é da área de saúde.",
             "Sei como é corrida a rotina de consultório.",
+            "Notei que você atende na área de saúde.",
+            "Trabalho com vários médicos que estão escalando a agenda.",
         ],
         'dentista': [
-            "Vi que você trabalha com estética dental.",
-            "Notei seu trabalho com harmonização.",
             "Curti os resultados que você posta.",
+            "Sei como funciona o mercado de odontologia premium.",
+            "Trabalho com vários dentistas que estão lotando a agenda.",
         ],
         'advogado': [
-            "Vi que você atua na área jurídica.",
-            "Notei sua especialidade.",
             "Interessante seu posicionamento aqui.",
+            "Sei como funciona a captação no jurídico.",
+            "Trabalho com vários advogados que estão gerando demanda previsível.",
         ],
         'empresário': [
-            "Vi que você empreende.",
-            "Notei seu negócio.",
-            "Curti a proposta da sua empresa.",
+            "Curti a proposta do seu negócio.",
+            "Notei que você empreende na área.",
+            "Trabalho com vários empresários que estão escalando.",
         ],
         'coach': [
-            "Vi seu trabalho com desenvolvimento pessoal.",
-            "Notei sua metodologia.",
             "Curti sua abordagem.",
+            "Sei como funciona o mercado de coaching.",
+            "Trabalho com vários coaches que estão lotando turmas.",
         ],
         'consultor': [
-            "Vi que você faz consultoria.",
-            "Notei sua área de atuação.",
-            "Interessante seu nicho.",
+            "Interessante seu nicho de atuação.",
+            "Sei como funciona a geração de demanda em consultoria.",
+            "Trabalho com vários consultores que estão escalando.",
         ],
         'nutricionista': [
-            "Vi seu trabalho com nutrição.",
-            "Notei sua especialidade.",
             "Curti seu conteúdo sobre alimentação.",
+            "Sei como funciona o mercado de nutrição.",
+            "Trabalho com vários nutris que estão lotando a agenda.",
         ],
         'psicólogo': [
-            "Vi seu trabalho com saúde mental.",
-            "Notei sua abordagem terapêutica.",
-            "Curti seu conteúdo.",
+            "Curti seu conteúdo sobre saúde mental.",
+            "Sei como funciona a captação em psicologia.",
+            "Trabalho com vários psicólogos que estão gerando demanda.",
         ],
         'marketing': [
-            "Vi que você é da área de marketing.",
-            "Notei seu trabalho com growth.",
             "Curti suas estratégias.",
+            "Interessante sua abordagem de growth.",
+            "Vi que você manja de aquisição.",
         ],
         'estetica': [
-            "Vi seu trabalho com estética.",
-            "Notei seus resultados.",
             "Curti os antes e depois.",
+            "Sei como funciona o mercado de estética.",
+            "Trabalho com várias clínicas que estão lotando.",
         ],
         'fisioterapeuta': [
-            "Vi seu trabalho com fisioterapia.",
-            "Notei sua especialidade.",
             "Curti sua abordagem.",
+            "Sei como funciona o mercado de fisio.",
+            "Trabalho com vários fisios que estão gerando demanda.",
         ],
         'personal': [
-            "Vi seu trabalho como personal.",
-            "Notei seus resultados com alunos.",
             "Curti sua metodologia.",
+            "Sei como funciona a captação de alunos.",
+            "Trabalho com vários personais que estão lotando a agenda.",
         ]
     }
 
@@ -332,7 +335,7 @@ Me conta: como tá a demanda de clientes hoje?"""
             'profession': profession or 'profissional',
             'location': location or '',
             'interest': interests[0] if interests else 'seu trabalho',
-            'bio_hook': self._generate_bio_hook(bio, profession, interests)
+            'bio_hook': self._generate_bio_hook(bio, profession, interests, profile)
         }
 
         # Gerar mensagem
@@ -340,13 +343,11 @@ Me conta: como tá a demanda de clientes hoje?"""
             message = template.format(**variables)
         except KeyError:
             # Fallback se alguma variável faltar
-            message = self.STANDARD_TEMPLATES[0].format(
-                first_name=first_name,
-                bio_hook='',
-                profession='profissional',
-                interest='seu trabalho',
-                location=''
-            )
+            message = f"""{first_name}, tudo bem?
+
+Passei pelo seu perfil.
+
+Posso te fazer uma pergunta?"""
             level = 'low'
 
         # Limpar mensagem
@@ -389,67 +390,213 @@ Me conta: como tá a demanda de clientes hoje?"""
         self,
         bio: str,
         profession: Optional[str],
-        interests: List[str]
+        interests: List[str],
+        profile: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         Gera hook CURIOSO baseado na bio - estilo Charlie Morgan.
-        Prioriza informações específicas da bio sobre hooks genéricos.
+
+        PRIORIDADES DE PERSONALIZAÇÃO:
+        1. Escala de negócio (múltiplas clínicas/empresas)
+        2. Operação internacional
+        3. Especialidades específicas extraídas da bio
+        4. Dados de autoridade (verificado, followers)
+        5. Profissão genérica (fallback)
         """
         hooks = []
+        bio_lower = bio.lower() if bio else ''
 
-        # PRIORIDADE 1: Extrair algo específico da bio
-        if bio and len(bio) > 10:
-            bio_lower = bio.lower()
+        # Extrair dados do profile se disponível
+        is_verified = profile.get('is_verified', False) if profile else False
+        followers = profile.get('follower_count', 0) if profile else 0
+        username = profile.get('username', '') if profile else ''
 
-            # Detectar especialidades específicas
-            specialties = {
+        # ===========================================
+        # PRIORIDADE 1: ESCALA DE NEGÓCIO
+        # Múltiplas clínicas/empresas = hook premium
+        # ===========================================
+
+        # Detectar @mentions (indica múltiplos negócios)
+        mentions = re.findall(r'@[\w\.]+', bio) if bio else []
+        if len(mentions) >= 2:
+            hooks.append(f"Vi que você comanda mais de um negócio.")
+            hooks.append(f"Notei que você tem múltiplas operações.")
+            hooks.append(f"Curti que você diversificou os negócios.")
+
+        # Detectar múltiplas clínicas/unidades
+        multi_unit_patterns = [
+            (r'fundador[a]?\s+(?:da|de|do)?\s*[@\w\s,]+,\s*[@\w\s,]+',
+             "Vi que você é fundador de mais de uma clínica."),
+            (r'\d+\s*(?:clínicas?|unidades?|filiais?)',
+             "Notei a expansão com múltiplas unidades."),
+            (r'(?:rede|grupo)\s+(?:de\s+)?(?:clínicas?|consultórios?)',
+             "Vi que você construiu uma rede."),
+        ]
+
+        for pattern, hook in multi_unit_patterns:
+            if re.search(pattern, bio_lower):
+                hooks.append(hook)
+                break
+
+        # ===========================================
+        # PRIORIDADE 2: OPERAÇÃO INTERNACIONAL
+        # Atuação em múltiplos países = hook premium
+        # ===========================================
+
+        international_markers = {
+            'usa': ['usa', 'eua', 'estados unidos', 'miami', 'orlando', 'new york', 'los angeles'],
+            'mexico': ['méxico', 'mexico', 'cancun', 'ciudad de méxico'],
+            'dominican': ['república dominicana', 'dominican republic', 'santo domingo', 'punta cana'],
+            'europe': ['portugal', 'espanha', 'españa', 'italia', 'london', 'paris'],
+            'latam': ['argentina', 'chile', 'colombia', 'peru'],
+        }
+
+        countries_found = []
+        for region, markers in international_markers.items():
+            for marker in markers:
+                if marker in bio_lower:
+                    countries_found.append(region)
+                    break
+
+        if len(countries_found) >= 2:
+            hooks.append("Vi que você atende internacionalmente.")
+            hooks.append("Notei sua operação em múltiplos países.")
+            hooks.append("Curti a expansão internacional.")
+        elif len(countries_found) == 1 and 'brasil' not in bio_lower:
+            hooks.append("Vi que você atende fora do Brasil também.")
+
+        # ===========================================
+        # PRIORIDADE 3: ESPECIALIDADES ESPECÍFICAS
+        # Procedimentos/técnicas específicas
+        # ===========================================
+
+        if not hooks and bio:
+            # Especialidades cirúrgicas específicas
+            surgical_specialties = {
+                'cirurgião plástico': 'Vi seu trabalho com cirurgia plástica.',
+                'cirurgia plástica': 'Vi seu trabalho com cirurgia plástica.',
+                'plástica': 'Vi seu trabalho com cirurgia plástica.',
+                'lipoaspiração': 'Vi seus resultados com lipo.',
+                'lipo': 'Vi seus resultados com lipo.',
+                'abdominoplastia': 'Notei seu trabalho com abdominoplastia.',
+                'rinoplastia': 'Vi que você faz rinoplastia.',
+                'mamoplastia': 'Notei seu trabalho com mamas.',
+                'mamas': 'Notei seu trabalho com mamas.',
+                'prótese': 'Vi seus resultados com prótese.',
+                'silicone': 'Vi seus resultados com prótese.',
+                'lifting': 'Notei seu trabalho com lifting.',
+                'blefaroplastia': 'Vi que você faz blefaroplastia.',
+                'bichectomia': 'Notei seu trabalho com bichectomia.',
+                'otoplastia': 'Vi que você faz otoplastia.',
+            }
+
+            # Especialidades estéticas não-cirúrgicas
+            aesthetic_specialties = {
+                'harmonização': 'Curti seu trabalho com harmonização.',
+                'bioestimulador': 'Vi seu trabalho com bioestimuladores.',
+                'fios': 'Notei seu trabalho com fios.',
+                'skinbooster': 'Vi seus resultados com skinbooster.',
+                'preenchimento': 'Curti seu trabalho com preenchimento.',
+                'botox': 'Vi seus resultados com toxina.',
+                'toxina': 'Vi seus resultados com toxina.',
+                'peeling': 'Notei seu trabalho com peelings.',
+                'laser': 'Vi seu trabalho com laser.',
+            }
+
+            # Especialidades médicas gerais
+            medical_specialties = {
                 'longevidade': 'Vi seu foco em longevidade.',
                 'emagrecimento': 'Notei seu trabalho com emagrecimento.',
-                'harmonização': 'Curti seu trabalho com harmonização.',
-                'estética': 'Vi seus resultados com estética.',
-                'botox': 'Notei seu trabalho com procedimentos.',
-                'implante': 'Vi que você trabalha com implantes.',
-                'ortodontia': 'Notei seu trabalho com ortodontia.',
-                'personal': 'Vi seu trabalho como personal.',
-                'crossfit': 'Notei que você é de crossfit.',
-                'pilates': 'Vi seu trabalho com pilates.',
-                'yoga': 'Notei seu trabalho com yoga.',
-                'coaching': 'Vi que você faz coaching.',
-                'mentoria': 'Notei que você faz mentoria.',
-                'consultoria': 'Vi que você faz consultoria.',
+                'metabólica': 'Vi seu foco em saúde metabólica.',
+                'integrativa': 'Notei seu foco em medicina integrativa.',
+                'funcional': 'Vi seu trabalho com medicina funcional.',
+                'nutrologia': 'Notei seu trabalho com nutrologia.',
+                'endocrinologia': 'Vi que você é endócrino.',
                 'dermatologia': 'Notei sua especialidade em dermato.',
                 'cardiologia': 'Vi que você é cardiologista.',
                 'ortopedia': 'Notei que você é ortopedista.',
-                'ginecologia': 'Vi sua especialidade.',
-                'pediatria': 'Notei que você atende crianças.',
-                'psiquiatria': 'Vi seu trabalho com psiquiatria.',
-                'nutrologia': 'Notei seu trabalho com nutrologia.',
-                'endocrino': 'Vi que você é endócrino.',
-                'integrativa': 'Notei seu foco em medicina integrativa.',
-                'funcional': 'Vi seu trabalho com medicina funcional.',
-                'clínica': 'Notei sua clínica.',
-                'consultório': 'Vi que você tem consultório próprio.',
             }
 
-            for keyword, hook in specialties.items():
+            # Especialidades business/coaching
+            business_specialties = {
+                'mentoria': 'Vi que você faz mentoria.',
+                'coaching': 'Notei seu trabalho com coaching.',
+                'consultoria': 'Vi que você faz consultoria.',
+                'infoproduto': 'Notei seu infoproduto.',
+                'curso': 'Vi que você tem curso.',
+                'método': 'Notei seu método.',
+                'treinamento': 'Vi seu trabalho com treinamentos.',
+            }
+
+            all_specialties = {
+                **surgical_specialties,
+                **aesthetic_specialties,
+                **medical_specialties,
+                **business_specialties
+            }
+
+            for keyword, hook in all_specialties.items():
                 if keyword in bio_lower:
                     hooks.append(hook)
                     break
 
-            # Extrair primeira parte da bio (antes de | ou 📍 ou •)
-            if not hooks:
-                for separator in ['|', '📍', '•', '🔹', '✨', '\n']:
-                    if separator in bio:
-                        first_part = bio.split(separator)[0].strip()
-                        if 10 < len(first_part) < 50:
-                            hooks.append(f"Vi que você trabalha com {first_part.lower()}.")
-                            break
+        # ===========================================
+        # PRIORIDADE 4: AUTORIDADE/SOCIAL PROOF
+        # Verificado, muitos followers
+        # ===========================================
 
-        # PRIORIDADE 2: Hook de profissão (se não achou nada específico)
+        if not hooks:
+            if is_verified:
+                hooks.append("Vi que você é verificado no Instagram.")
+                hooks.append("Notei o selo de verificado.")
+            elif followers >= 50000:
+                hooks.append("Vi que você tem uma audiência grande.")
+                hooks.append("Notei sua comunidade engajada.")
+            elif followers >= 10000:
+                hooks.append("Vi que você construiu uma boa audiência.")
+
+        # ===========================================
+        # PRIORIDADE 5: EXTRAÇÃO GENÉRICA DA BIO
+        # Primeira parte relevante da bio (evitar termos genéricos)
+        # ===========================================
+
+        # Termos muito genéricos que não geram personalização
+        generic_terms = [
+            'médico', 'medico', 'dentista', 'advogado', 'coach',
+            'empresário', 'empresario', 'consultor', 'especialista',
+            'profissional', 'empreendedor', 'dono', 'fundador',
+            'ceo', 'diretor', 'gerente', 'sócio', 'socio'
+        ]
+
+        if not hooks and bio:
+            # Tentar extrair o "título" da bio (antes dos separadores)
+            for separator in ['|', '📍', '•', '🔹', '✨', '👇', '⬇', '\n']:
+                if separator in bio:
+                    first_part = bio.split(separator)[0].strip()
+                    # Limpar emojis do início
+                    first_part = re.sub(r'^[\U0001F300-\U0001F9FF\s]+', '', first_part)
+                    first_part_lower = first_part.lower()
+
+                    # Verificar se NÃO é termo genérico
+                    is_generic = any(term in first_part_lower for term in generic_terms)
+
+                    if 5 < len(first_part) < 40 and not is_generic:
+                        # Não usar se for só emoji
+                        if not re.match(r'^[\U0001F300-\U0001F9FF\s]+$', first_part):
+                            hooks.append(f"Vi que você trabalha com {first_part_lower}.")
+                        break
+
+        # ===========================================
+        # PRIORIDADE 6: PROFISSÃO GENÉRICA (FALLBACK)
+        # ===========================================
+
         if not hooks and profession and profession in self.PROFESSION_HOOKS:
             hooks.extend(self.PROFESSION_HOOKS[profession])
 
-        # PRIORIDADE 3: Hook de interesse
+        # ===========================================
+        # PRIORIDADE 7: INTERESSE (ÚLTIMO FALLBACK)
+        # ===========================================
+
         if not hooks:
             for interest in interests:
                 if interest in self.INTEREST_HOOKS:
@@ -538,8 +685,8 @@ Me conta: como tá a demanda de clientes hoje?"""
         greeting_template = random.choice(SPINTAX_GREETINGS)
         greeting = greeting_template.replace('{first_name}', first_name)
 
-        # 2. CONTEÚDO (IA - personalizado pela bio)
-        bio_hook = self._generate_bio_hook(bio, profession, interests)
+        # 2. CONTEÚDO (IA - personalizado pela bio + dados do profile)
+        bio_hook = self._generate_bio_hook(bio, profession, interests, profile)
 
         # 3. FECHAMENTO (Spintax por nível)
         closings = SPINTAX_CLOSINGS_BY_LEVEL.get(level, SPINTAX_CLOSINGS_BY_LEVEL['medium'])
