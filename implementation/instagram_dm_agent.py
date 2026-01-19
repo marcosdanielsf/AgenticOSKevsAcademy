@@ -55,12 +55,30 @@ except ImportError:
 
 # Import multi-tenant account manager
 try:
-    from account_manager import AccountManager, InstagramAccount, get_default_account, RoundRobinAccountRotator
+    from .account_manager import AccountManager, InstagramAccount, get_default_account, RoundRobinAccountRotator
     MULTI_TENANT_AVAILABLE = True
 except ImportError:
-    MULTI_TENANT_AVAILABLE = False
-    RoundRobinAccountRotator = None
-    logger.warning("AccountManager not available - using single account mode")
+    try:
+        from account_manager import AccountManager, InstagramAccount, get_default_account, RoundRobinAccountRotator
+        MULTI_TENANT_AVAILABLE = True
+    except ImportError:
+        MULTI_TENANT_AVAILABLE = False
+        RoundRobinAccountRotator = None
+        # logger not available yet - will log later if needed
+
+# Import proxy manager
+try:
+    from .proxy_manager import ProxyManager, ProxyConfig, ProxyRotator
+    PROXY_AVAILABLE = True
+except ImportError:
+    try:
+        from proxy_manager import ProxyManager, ProxyConfig, ProxyRotator
+        PROXY_AVAILABLE = True
+    except ImportError:
+        PROXY_AVAILABLE = False
+        ProxyManager = None
+        ProxyConfig = None
+        ProxyRotator = None
 
 # Load environment
 load_dotenv()
@@ -675,6 +693,10 @@ class InstagramDMAgent:
         self.account_manager = AccountManager() if MULTI_TENANT_AVAILABLE else None
         self.current_account: Optional[InstagramAccount] = None
 
+        # Proxy management
+        self.proxy_manager = ProxyManager() if PROXY_AVAILABLE else None
+        self.current_proxy: Optional[ProxyConfig] = None
+
         # Smart mode components
         if self.smart_mode:
             self.scraper = None  # Initialized after page is ready
@@ -723,16 +745,37 @@ class InstagramDMAgent:
         logger.info(f"   Headless: {self.headless}")
         logger.info(f"   Remaining today: {self.current_account.remaining_today}")
 
+        # Get proxy for tenant/account
+        if self.proxy_manager:
+            # Try account-specific proxy first, then tenant proxy
+            if self.current_account and self.current_account.id:
+                self.current_proxy = self.proxy_manager.get_proxy_for_account(self.current_account.id)
+            if not self.current_proxy:
+                self.current_proxy = self.proxy_manager.get_proxy_for_tenant(self.tenant_id)
+
+            if self.current_proxy:
+                logger.info(f"   🌐 Proxy: {self.current_proxy.host}:{self.current_proxy.port} ({self.current_proxy.country or 'unknown'})")
+            else:
+                logger.warning("   ⚠️ No proxy configured - using direct connection")
+
         playwright = await async_playwright().start()
 
-        self.browser = await playwright.chromium.launch(
-            headless=self.headless,
-            args=[
+        # Browser launch options
+        launch_options = {
+            'headless': self.headless,
+            'args': [
                 '--disable-blink-features=AutomationControlled',
                 '--no-sandbox',
                 '--disable-dev-shm-usage'
             ]
-        )
+        }
+
+        # Add proxy if available
+        if self.current_proxy:
+            launch_options['proxy'] = self.current_proxy.to_playwright()
+            logger.info(f"   🔒 Browser will use proxy: {self.current_proxy.proxy_type.value}://{self.current_proxy.host}:{self.current_proxy.port}")
+
+        self.browser = await playwright.chromium.launch(**launch_options)
 
         # Browser context options
         context_options = {
@@ -1239,6 +1282,10 @@ class InstagramDMAgent:
 
             logger.info(f"   ✅ DM sent to @{lead.username}")
 
+            # Record proxy success
+            if self.proxy_manager and self.current_proxy:
+                self.proxy_manager.record_success(self.current_proxy.id)
+
             return DMResult(
                 lead_id=lead.id,
                 username=lead.username,
@@ -1255,6 +1302,9 @@ class InstagramDMAgent:
             block_check = await self.check_for_block(context=f"dm_exception_{lead.username}")
             if block_check.is_blocked:
                 error_msg = f"BLOCKED:{block_check.block_type.value}:{block_check.message}"
+                # Record proxy failure for blocks (might indicate proxy detection)
+                if self.proxy_manager and self.current_proxy:
+                    self.proxy_manager.mark_proxy_failed(self.current_proxy.id, f"Block detected: {block_check.block_type.value}")
 
             return DMResult(
                 lead_id=lead.id,
@@ -1494,6 +1544,16 @@ class InstagramDMAgent:
                 if self.current_account and self.current_account.id != current_account.id:
                     logger.info(f"   Alternando de @{self.current_account.username} → @{current_account.username}")
                     self.current_account = current_account
+
+                    # Update proxy for new account
+                    if self.proxy_manager:
+                        new_proxy = self.proxy_manager.get_proxy_for_account(current_account.id)
+                        if not new_proxy:
+                            new_proxy = self.proxy_manager.get_proxy_for_tenant(self.tenant_id)
+                        if new_proxy and (not self.current_proxy or new_proxy.id != self.current_proxy.id):
+                            self.current_proxy = new_proxy
+                            logger.info(f"   🌐 Proxy atualizado: {new_proxy.host}:{new_proxy.port}")
+
                     # Recarregar contexto do browser com nova sessão se necessário
                     if current_account.session_data and self.context:
                         try:

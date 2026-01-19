@@ -95,7 +95,35 @@
 
 ---
 
-## Sessão 2026-01-19 - BLOCK DETECTION ✅
+## Sessão 2026-01-19 - BLOCK DETECTION + MESSAGE PERSONALIZATION ✅
+
+### ✅ Concluído: Personalização Premium de Mensagens (Commit: e6aa96c)
+
+- [x] **Detecção de Escala de Negócio**
+  - Múltiplas clínicas/empresas via @mentions
+  - Hooks: "Vi que você comanda mais de um negócio"
+
+- [x] **Detecção de Operação Internacional**
+  - USA, México, República Dominicana, Europa, LATAM
+  - Hooks: "Notei sua operação em múltiplos países"
+
+- [x] **Hooks para Perfis Verificados**
+  - Selo azul, alto número de followers
+  - Hooks baseados em autoridade e social proof
+
+- [x] **Especialidades Específicas**
+  - Cirurgia plástica, lipo, mamas, harmonização, etc.
+  - 40+ especialidades mapeadas
+
+- [x] **Filtro de Termos Genéricos**
+  - Não usa mais "médico", "dentista" genérico
+  - Prefere hooks específicos da bio
+
+### Exemplo de Melhoria:
+```
+ANTES: "Yuri, curti o que você faz. Vi que você trabalha com cirurgia plástica."
+DEPOIS: "Yuri, passei pelo seu perfil. Vi que você comanda mais de um negócio."
+```
 
 ### ✅ Concluído: Sistema de Detecção de Bloqueio
 
@@ -140,11 +168,80 @@
 ### P0 - Urgente
 - [ ] Testar spintax híbrido em campanha real
 - [ ] Testar block detection em campanha real
+- [ ] **MELHORAR personalização de mensagens** (abordagem ainda fraca)
 
 ### P1 - Importante
-- [ ] Warm-up protocol manager
+- [x] **Warm-up protocol manager** ✅ Commit: `8f5593c`
+- [x] **Proxy rotation infrastructure** ✅ (em andamento)
 - [ ] Instagram Private API extraction
-- [ ] Proxy rotation infrastructure
+
+---
+
+## Sessão 2026-01-19 - WARM-UP PROTOCOL ✅
+
+### ✅ Concluído: Sistema de Aquecimento de Contas
+
+**Arquivos criados:**
+- `implementation/warmup_manager.py` - WarmupManager completo
+- `migrations/002_add_warmup_table.sql` - Migration SQL
+
+**Estágios do Warm-up:**
+| Estágio | Dias | DMs/dia | DMs/hora |
+|---------|------|---------|----------|
+| NEW | 1-3 | 5 | 2 |
+| WARMING | 4-7 | 15 | 4 |
+| PROGRESSING | 8-14 | 30 | 7 |
+| READY | 15+ | 50 | 10 |
+
+**Features:**
+- Detecção de inatividade (7+ dias → WARMING, 30+ dias → NEW)
+- Regressão de estágio após bloqueio
+- Integração automática com AccountManager
+- Limites efetivos calculados automaticamente
+
+**Para ativar:**
+1. Executar migration no Supabase SQL Editor
+2. Criar conta com `start_warmup=True` (padrão)
+3. Sistema ajusta limites automaticamente
+
+---
+
+## Sessão 2026-01-19 - PROXY ROTATION ✅
+
+### ✅ Concluído: Sistema de Proxy por Tenant
+
+**Arquivos criados:**
+- `implementation/proxy_manager.py` - ProxyManager completo
+- `migrations/003_add_proxies_table.sql` - Migration SQL
+
+**Features:**
+- Proxy específico por tenant ou conta
+- Fallback para proxy global compartilhado
+- Registro de sucesso/falha de cada proxy
+- Desativação automática após 5 falhas
+- Teste de conectividade (test_proxy)
+- Integração com Playwright browser launch
+
+**Estrutura do Proxy:**
+```python
+ProxyConfig:
+    - id, tenant_id, name
+    - host, port, username, password
+    - proxy_type: http, https, socks5
+    - provider: brightdata, smartproxy, iproyal, oxylabs, custom
+    - country, city
+    - is_residential: True = melhor para Instagram
+    - fail_count, success_count
+```
+
+**Para usar:**
+1. Executar migration no Supabase SQL Editor
+2. Adicionar proxies:
+```sql
+INSERT INTO instagram_proxies (tenant_id, host, port, username, password, country, is_residential)
+VALUES ('dr_alberto', 'br.smartproxy.com', 10000, 'user123', 'pass456', 'BR', true);
+```
+3. Sistema usa proxy automaticamente ao iniciar browser
 
 ### P2 - Infraestrutura
 - [ ] Stealth Browser MCP integration
