@@ -5243,11 +5243,12 @@ async def run_auto_outreach(
         if request.account_id:
             filters["id"] = f"eq.{request.account_id}"
 
-        accounts_response = supabase_client._request(
-            "GET",
-            "instagram_accounts",
+        accounts_resp = requests.get(
+            f"{db.base_url}/instagram_accounts",
+            headers=db.headers,
             params={"select": "*", **filters}
         )
+        accounts_response = accounts_resp.json() if accounts_resp.status_code == 200 else []
 
         if not accounts_response:
             logger.info("Nenhuma conta com outreach habilitado encontrada")
@@ -5279,9 +5280,9 @@ async def run_auto_outreach(
             try:
                 # Verificar quantos ja foram enviados hoje
                 today = datetime.now().date().isoformat()
-                sent_today_response = supabase_client._request(
-                    "GET",
-                    "new_followers_detected",
+                sent_today_resp = requests.get(
+                    f"{db.base_url}/new_followers_detected",
+                    headers=db.headers,
                     params={
                         "select": "id",
                         "account_id": f"eq.{account_id}",
@@ -5289,7 +5290,8 @@ async def run_auto_outreach(
                         "outreach_sent_at": f"gte.{today}T00:00:00"
                     }
                 )
-                sent_today = len(sent_today_response) if sent_today_response else 0
+                sent_today_response = sent_today_resp.json() if sent_today_resp.status_code == 200 else []
+                sent_today = len(sent_today_response)
                 remaining_today = max(0, daily_limit - sent_today)
 
                 if remaining_today == 0:
@@ -5420,15 +5422,16 @@ async def get_auto_outreach_status():
     """
     try:
         # Buscar contas com outreach habilitado
-        accounts_response = supabase_client._request(
-            "GET",
-            "instagram_accounts",
+        accounts_resp = requests.get(
+            f"{db.base_url}/instagram_accounts",
+            headers=db.headers,
             params={
                 "select": "*",
                 "outreach_enabled": "eq.true",
                 "is_active": "eq.true"
             }
         )
+        accounts_response = accounts_resp.json() if accounts_resp.status_code == 200 else []
 
         if not accounts_response:
             return {
@@ -5450,9 +5453,9 @@ async def get_auto_outreach_status():
             min_icp_score = account.get("outreach_min_icp_score", 70)
 
             # Contar enviados hoje
-            sent_response = supabase_client._request(
-                "GET",
-                "new_followers_detected",
+            sent_resp = requests.get(
+                f"{db.base_url}/new_followers_detected",
+                headers=db.headers,
                 params={
                     "select": "id",
                     "account_id": f"eq.{account_id}",
@@ -5460,12 +5463,13 @@ async def get_auto_outreach_status():
                     "outreach_sent_at": f"gte.{today}T00:00:00"
                 }
             )
-            sent_today = len(sent_response) if sent_response else 0
+            sent_response = sent_resp.json() if sent_resp.status_code == 200 else []
+            sent_today = len(sent_response)
 
             # Contar pendentes
-            pending_response = supabase_client._request(
-                "GET",
-                "new_followers_detected",
+            pending_resp = requests.get(
+                f"{db.base_url}/new_followers_detected",
+                headers=db.headers,
                 params={
                     "select": "id",
                     "account_id": f"eq.{account_id}",
@@ -5473,7 +5477,8 @@ async def get_auto_outreach_status():
                     "icp_score": f"gte.{min_icp_score}"
                 }
             )
-            pending_count = len(pending_response) if pending_response else 0
+            pending_response = pending_resp.json() if pending_resp.status_code == 200 else []
+            pending_count = len(pending_response)
 
             remaining = max(0, daily_limit - sent_today)
 
