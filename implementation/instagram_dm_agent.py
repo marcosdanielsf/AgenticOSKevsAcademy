@@ -23,7 +23,8 @@ import logging
 from datetime import datetime, timedelta, date
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
+from enum import Enum
 
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 from dotenv import load_dotenv
@@ -140,6 +141,46 @@ class DMResult:
     def __post_init__(self):
         if self.timestamp is None:
             self.timestamp = datetime.now()
+
+
+class BlockType(Enum):
+    """Types of Instagram blocks/restrictions"""
+    NONE = "none"
+    CHECKPOINT = "checkpoint"           # Verification required
+    ACTION_BLOCKED = "action_blocked"   # Specific action temporarily blocked
+    RATE_LIMITED = "rate_limited"       # Too many actions
+    ACCOUNT_DISABLED = "account_disabled"
+    SUSPICIOUS_ACTIVITY = "suspicious_activity"
+    TWO_FACTOR = "two_factor"           # 2FA challenge
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class BlockDetectionResult:
+    """Result of block detection check"""
+    is_blocked: bool
+    block_type: BlockType = BlockType.NONE
+    message: str = ""
+    detected_at: datetime = field(default_factory=datetime.now)
+    screenshot_path: Optional[Path] = None
+
+    @property
+    def should_stop_campaign(self) -> bool:
+        """Critical blocks that should stop the entire campaign"""
+        return self.block_type in [
+            BlockType.CHECKPOINT,
+            BlockType.ACTION_BLOCKED,
+            BlockType.ACCOUNT_DISABLED,
+            BlockType.SUSPICIOUS_ACTIVITY
+        ]
+
+    @property
+    def should_switch_account(self) -> bool:
+        """Blocks that suggest switching to another account"""
+        return self.block_type in [
+            BlockType.ACTION_BLOCKED,
+            BlockType.RATE_LIMITED
+        ]
 
 
 # ============================================
@@ -746,6 +787,150 @@ class InstagramDMAgent:
         logger.info(f"📸 Screenshot: {screenshot_path}")
         return screenshot_path
 
+    async def check_for_block(self, context: str = "action") -> BlockDetectionResult:
+        """
+        Detect if Instagram has blocked/restricted the account.
+
+        Checks for:
+        - URL-based detection (checkpoint, challenge, two_factor)
+        - Page content detection (action_blocked, rate_limited)
+        - Error dialogs and popups
+
+        Args:
+            context: What action triggered this check (for logging)
+
+        Returns:
+            BlockDetectionResult with block type and details
+        """
+        try:
+            current_url = self.page.url
+
+            # 1. URL-based detection
+            if 'challenge' in current_url:
+                screenshot = await self.take_screenshot(f"block_checkpoint_{context}")
+                logger.warning(f"⛔ CHECKPOINT detected during {context}")
+                return BlockDetectionResult(
+                    is_blocked=True,
+                    block_type=BlockType.CHECKPOINT,
+                    message="Instagram requires verification (checkpoint challenge)",
+                    screenshot_path=screenshot
+                )
+
+            if 'two_factor' in current_url:
+                screenshot = await self.take_screenshot(f"block_2fa_{context}")
+                logger.warning(f"⛔ TWO_FACTOR detected during {context}")
+                return BlockDetectionResult(
+                    is_blocked=True,
+                    block_type=BlockType.TWO_FACTOR,
+                    message="Two-factor authentication required",
+                    screenshot_path=screenshot
+                )
+
+            if 'suspended' in current_url or 'disabled' in current_url:
+                screenshot = await self.take_screenshot(f"block_disabled_{context}")
+                logger.error(f"⛔ ACCOUNT DISABLED detected during {context}")
+                return BlockDetectionResult(
+                    is_blocked=True,
+                    block_type=BlockType.ACCOUNT_DISABLED,
+                    message="Account appears to be disabled or suspended",
+                    screenshot_path=screenshot
+                )
+
+            # 2. Page content detection - check for common block messages
+            page_content = await self.page.content()
+            page_content_lower = page_content.lower()
+
+            # Action blocked patterns
+            action_blocked_patterns = [
+                "action blocked",
+                "try again later",
+                "we restrict certain activity",
+                "this action was blocked",
+                "temporarily blocked",
+                "you're temporarily blocked"
+            ]
+
+            for pattern in action_blocked_patterns:
+                if pattern in page_content_lower:
+                    screenshot = await self.take_screenshot(f"block_action_{context}")
+                    logger.warning(f"⛔ ACTION_BLOCKED detected during {context}: '{pattern}'")
+                    return BlockDetectionResult(
+                        is_blocked=True,
+                        block_type=BlockType.ACTION_BLOCKED,
+                        message=f"Instagram blocked this action: {pattern}",
+                        screenshot_path=screenshot
+                    )
+
+            # Rate limit patterns
+            rate_limit_patterns = [
+                "please wait a few minutes",
+                "you've been temporarily limited",
+                "slow down",
+                "too many requests",
+                "rate limit"
+            ]
+
+            for pattern in rate_limit_patterns:
+                if pattern in page_content_lower:
+                    screenshot = await self.take_screenshot(f"block_rate_{context}")
+                    logger.warning(f"⚠️ RATE_LIMITED detected during {context}: '{pattern}'")
+                    return BlockDetectionResult(
+                        is_blocked=True,
+                        block_type=BlockType.RATE_LIMITED,
+                        message=f"Instagram rate limit hit: {pattern}",
+                        screenshot_path=screenshot
+                    )
+
+            # Suspicious activity patterns
+            suspicious_patterns = [
+                "suspicious activity",
+                "unusual login",
+                "we detected unusual activity",
+                "confirm it's you"
+            ]
+
+            for pattern in suspicious_patterns:
+                if pattern in page_content_lower:
+                    screenshot = await self.take_screenshot(f"block_suspicious_{context}")
+                    logger.warning(f"⛔ SUSPICIOUS_ACTIVITY detected during {context}: '{pattern}'")
+                    return BlockDetectionResult(
+                        is_blocked=True,
+                        block_type=BlockType.SUSPICIOUS_ACTIVITY,
+                        message=f"Instagram detected suspicious activity: {pattern}",
+                        screenshot_path=screenshot
+                    )
+
+            # 3. Check for error dialogs/popups
+            try:
+                # Instagram often shows blocks in dialog boxes
+                error_dialog = await self.page.query_selector('[role="dialog"]')
+                if error_dialog:
+                    dialog_text = await error_dialog.inner_text()
+                    dialog_lower = dialog_text.lower()
+
+                    if any(p in dialog_lower for p in action_blocked_patterns):
+                        screenshot = await self.take_screenshot(f"block_dialog_{context}")
+                        logger.warning(f"⛔ Block detected in dialog during {context}")
+                        return BlockDetectionResult(
+                            is_blocked=True,
+                            block_type=BlockType.ACTION_BLOCKED,
+                            message=f"Block dialog: {dialog_text[:100]}",
+                            screenshot_path=screenshot
+                        )
+            except:
+                pass  # No dialog found, that's fine
+
+            # No block detected
+            return BlockDetectionResult(is_blocked=False, block_type=BlockType.NONE)
+
+        except Exception as e:
+            logger.error(f"Error checking for block: {e}")
+            return BlockDetectionResult(
+                is_blocked=False,
+                block_type=BlockType.UNKNOWN,
+                message=f"Error during block check: {str(e)}"
+            )
+
     async def login(self) -> bool:
         """Login to Instagram and save session"""
         logger.info("🔐 Logging into Instagram...")
@@ -940,13 +1125,24 @@ class InstagramDMAgent:
             return self.get_personalized_message(lead), None, None
 
     async def send_dm(self, lead: Lead, message: str) -> DMResult:
-        """Send DM to a single lead"""
+        """Send DM to a single lead with block detection"""
         logger.info(f"💬 Sending DM to @{lead.username}...")
 
         try:
             # Go to Instagram Direct
             await self.page.goto('https://www.instagram.com/direct/inbox/', wait_until='domcontentloaded', timeout=60000)
             await asyncio.sleep(2)
+
+            # Check for blocks after navigation
+            block_check = await self.check_for_block(context=f"dm_inbox_{lead.username}")
+            if block_check.is_blocked:
+                logger.warning(f"   ⛔ Block detected before sending DM: {block_check.block_type.value}")
+                return DMResult(
+                    lead_id=lead.id,
+                    username=lead.username,
+                    success=False,
+                    error=f"BLOCKED:{block_check.block_type.value}:{block_check.message}"
+                )
 
             # Click "New Message" / "Send message" button
             try:
@@ -1029,6 +1225,18 @@ class InstagramDMAgent:
             await self.page.keyboard.press('Enter')
             await asyncio.sleep(2)
 
+            # Check for blocks after sending (Instagram often shows block popup after action)
+            block_check = await self.check_for_block(context=f"dm_sent_{lead.username}")
+            if block_check.is_blocked:
+                logger.warning(f"   ⛔ Block detected AFTER sending DM: {block_check.block_type.value}")
+                # Message might have been sent before block popup - mark as failed to be safe
+                return DMResult(
+                    lead_id=lead.id,
+                    username=lead.username,
+                    success=False,
+                    error=f"BLOCKED:{block_check.block_type.value}:{block_check.message}"
+                )
+
             logger.info(f"   ✅ DM sent to @{lead.username}")
 
             return DMResult(
@@ -1042,6 +1250,11 @@ class InstagramDMAgent:
             error_msg = str(e)
             logger.error(f"   ❌ Failed to send DM to @{lead.username}: {error_msg}")
             await self.take_screenshot(f"dm_error_{lead.username}")
+
+            # Check if exception was caused by a block
+            block_check = await self.check_for_block(context=f"dm_exception_{lead.username}")
+            if block_check.is_blocked:
+                error_msg = f"BLOCKED:{block_check.block_type.value}:{block_check.message}"
 
             return DMResult(
                 lead_id=lead.id,
@@ -1138,6 +1351,27 @@ class InstagramDMAgent:
                     self.db.sync_to_growth_leads(lead.username, result.message_sent, lead_data, score_data)
                 else:
                     self.dms_failed += 1
+
+                    # Check if blocked - stop campaign for critical blocks
+                    if result.error and result.error.startswith("BLOCKED:"):
+                        parts = result.error.split(":", 2)
+                        block_type_str = parts[1] if len(parts) > 1 else "unknown"
+                        block_msg = parts[2] if len(parts) > 2 else ""
+
+                        # Critical blocks that should stop the campaign
+                        critical_blocks = ["checkpoint", "action_blocked", "account_disabled", "suspicious_activity"]
+                        if block_type_str in critical_blocks:
+                            logger.error(f"🛑 CRITICAL BLOCK DETECTED: {block_type_str}")
+                            logger.error(f"   Message: {block_msg}")
+                            logger.error(f"   Stopping campaign to protect account...")
+                            self.db.end_run(self.dms_sent, self.dms_failed, self.dms_skipped,
+                                          status='blocked', error_log=result.error)
+                            return  # Stop campaign immediately
+
+                        # Rate limit - just log warning, might recover
+                        elif block_type_str == "rate_limited":
+                            logger.warning(f"⚠️ Rate limit detected. Waiting extra time before continuing...")
+                            await asyncio.sleep(300)  # Wait 5 minutes
 
                 # Progress update
                 logger.info(f"📊 Progress: {i+1}/{len(leads)} | Sent: {self.dms_sent} | Failed: {self.dms_failed} | Skipped: {self.dms_skipped}")
@@ -1323,8 +1557,33 @@ class InstagramDMAgent:
                 else:
                     self.dms_failed += 1
 
-                    # Verificar se foi bloqueado
-                    if result.error and ('blocked' in result.error.lower() or 'rate' in result.error.lower()):
+                    # Verificar se foi bloqueado usando novo formato
+                    if result.error and result.error.startswith("BLOCKED:"):
+                        parts = result.error.split(":", 2)
+                        block_type_str = parts[1] if len(parts) > 1 else "unknown"
+                        block_msg = parts[2] if len(parts) > 2 else ""
+
+                        logger.warning(f"⛔ Conta @{current_account.username} bloqueada: {block_type_str}")
+
+                        # Mark account as blocked
+                        rotator.mark_account_blocked(current_account.id, hours=24, reason=result.error)
+
+                        # Check if all accounts are blocked
+                        available_accounts = [a for a in rotator.accounts if not a.is_blocked]
+                        if not available_accounts:
+                            logger.error("🛑 TODAS AS CONTAS BLOQUEADAS! Parando campanha.")
+                            self.db.end_run(self.dms_sent, self.dms_failed, self.dms_skipped,
+                                          status='all_accounts_blocked', error_log=result.error)
+                            return
+
+                        # Critical blocks - remove account from rotation
+                        critical_blocks = ["checkpoint", "action_blocked", "account_disabled", "suspicious_activity"]
+                        if block_type_str in critical_blocks:
+                            logger.warning(f"   Removendo @{current_account.username} da rotação (bloqueio crítico)")
+                            # Account will be skipped automatically by rotator
+
+                    # Legacy check for non-formatted errors
+                    elif result.error and ('blocked' in result.error.lower() or 'rate' in result.error.lower()):
                         logger.warning(f"⛔ Conta @{current_account.username} pode estar bloqueada!")
                         rotator.mark_account_blocked(current_account.id, hours=24, reason=result.error)
 
