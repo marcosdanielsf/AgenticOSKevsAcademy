@@ -47,11 +47,14 @@ def _get_ghl_headers(api_key: Optional[str] = None) -> Dict[str, str]:
     }
 
 
-async def _search_conversation(contact_id: str, location_id: str, api_key: Optional[str] = None) -> Optional[Dict]:
+async def _search_conversation(contact_id: str, location_id: str, api_key: Optional[str] = None, channel_filter: Optional[str] = None) -> Optional[Dict]:
     """
     Busca a conversa de um contato no GHL.
 
     API: GET /conversations/search?contactId={contact_id}&locationId={location_id}
+
+    Args:
+        channel_filter: Filtrar por canal específico ("instagram", "whatsapp", "sms", etc.)
     """
     headers = _get_ghl_headers(api_key)
 
@@ -75,6 +78,21 @@ async def _search_conversation(contact_id: str, location_id: str, api_key: Optio
 
             if not conversations:
                 logger.info(f"Nenhuma conversa encontrada para contact {contact_id}")
+                return None
+
+            # Se channel_filter especificado, busca a conversa do canal correto
+            if channel_filter:
+                channel_lower = channel_filter.lower()
+                for conv in conversations:
+                    conv_type = conv.get("type", "").lower()
+                    # Verifica se o tipo da conversa contém o filtro
+                    # Ex: "TYPE_INSTAGRAM" contém "instagram"
+                    if channel_lower in conv_type:
+                        logger.info(f"Conversa do canal {channel_filter} encontrada: {conv.get('id')}")
+                        return conv
+
+                # Nenhuma conversa do canal encontrada
+                logger.info(f"Nenhuma conversa do canal {channel_filter} para contact {contact_id}. Tipos disponíveis: {[c.get('type') for c in conversations]}")
                 return None
 
             # Retorna a primeira (mais recente por padrão)
@@ -175,8 +193,8 @@ async def detect_conversation_origin(
             "error": "GHL_API_KEY não configurada"
         }
 
-    # 1. Buscar conversa do contato
-    conversation = await _search_conversation(contact_id, location_id, effective_api_key)
+    # 1. Buscar conversa do contato (já filtrando pelo canal se especificado)
+    conversation = await _search_conversation(contact_id, location_id, effective_api_key, channel_filter)
 
     if not conversation:
         return {
@@ -187,14 +205,6 @@ async def detect_conversation_origin(
 
     conversation_id = conversation.get("id")
     conversation_type = conversation.get("type", "").lower()  # sms, email, instagram, etc.
-
-    # Filtrar por canal se especificado
-    if channel_filter and channel_filter.lower() not in conversation_type:
-        return {
-            "origin": "unknown",
-            "error": f"Conversa encontrada mas não é do canal {channel_filter}",
-            "conversation_type": conversation_type
-        }
 
     # 2. Buscar mensagens da conversa
     messages = await _get_conversation_messages(conversation_id, limit=100, api_key=effective_api_key)
