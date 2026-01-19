@@ -1,172 +1,139 @@
-# AgenticOS - Insights e Decisões
+# AgenticOS - Insights e Decisoes
 
 > **Atualizado em:** 2026-01-16
-> **Arquivo de conhecimento acumulado - NÃO DELETAR**
+> Conhecimento acumulado durante o desenvolvimento
 
 ---
 
-## Decisões de Arquitetura
+## Arquitetura
 
-### 1. Scoring Multi-Tenant via Supabase (2026-01-16)
+### API Server (api_server.py)
+- **Linhas:** ~4.700
+- **Endpoints:** 57 rotas
+- **Framework:** FastAPI + Uvicorn
+- **Deploy:** Railway via Nixpacks
 
-**Contexto:** Precisávamos de ICP scoring personalizado por cliente.
+### Problemas Criticos de Escalabilidade
 
-**Opções consideradas:**
-- A) Tabela Supabase `tenant_icp_config` ✅ ESCOLHIDA
-- B) Arquivo JSON por tenant
-- C) Configuração via n8n
-
-**Decisão:** Opção A - Supabase centralizado com cache em memória.
-
-**Razão:**
-- Facilita CRUD via Supabase Dashboard
-- Cache evita queries repetidas
-- Fallback automático para DEFAULT se tenant não existe
-
-**Implementação:**
+#### 1. Campanhas em Memoria RAM
 ```python
-_config_cache: Dict[str, TenantICPConfig] = {}
+# Linha 4516-4517
+running_campaigns: Dict[str, Dict[str, Any]] = {}
+```
+**Problema:** Perde tudo em crash/restart. Impossivel escalar horizontalmente.
+**Solucao:** Migrar para Redis HSET
 
-def get_tenant_config(tenant_id: str) -> TenantICPConfig:
-    if tenant_id in _config_cache:
-        return _config_cache[tenant_id]
-    config = _fetch_tenant_config(tenant_id)
-    if not config:
-        config = _fetch_tenant_config("DEFAULT")
-    _config_cache[tenant_id] = config
-    return config
+#### 2. Rate Limiter Falho
+```python
+# Linha 91-170
+class RateLimiter:
+    self.requests: Dict[str, List[float]] = defaultdict(list)
+```
+**Problema:** Memory leak, sem persistencia, bypass facil.
+**Solucao:** Redis INCR com TTL
+
+#### 3. N+1 Queries Supabase
+```python
+# Linha 344-554
+# Cada save_lead faz 2 requests (check + insert/update)
+```
+**Solucao:** Usar UPSERT ou bulk operations
+
+#### 4. BackgroundTasks Sem Retry
+**Problema:** 12 endpoints usam BackgroundTasks sem persistencia.
+**Solucao:** Celery + Redis
+
+#### 5. Auth Superficial
+```python
+# Linha 779-783
+# Apenas verifica API_SECRET_KEY header
+# Sem JWT, sem scopes, sem RBAC
 ```
 
 ---
 
-### 2. Sistema de Scoring - 4 Categorias (2026-01-16)
+## Decisoes Tecnicas
 
-**Pesos definidos:**
-| Categoria | Peso | O que avalia |
-|-----------|------|--------------|
-| Bio | 30 pts | Keywords de decisor, profissão, interesses |
-| Engagement | 30 pts | Ratio followers/following, conta verificada |
-| Profile | 25 pts | Business account, público, localização |
-| Recency | 15 pts | Atividade recente (posts, stories) |
+### Multi-Tenant Scoring
+- Cada tenant tem seu proprio ICP config na tabela `tenant_icp_config`
+- Score calculado com pesos diferentes por tenant
+- Prioridades: HOT (>=70), WARM (50-69), COLD (40-49), NURTURING (<40)
 
-**Thresholds:**
-| Prioridade | Score | Ação |
-|------------|-------|------|
-| HOT | >= 70 | Prospectar imediatamente |
-| WARM | 50-69 | Prospectar |
-| COLD | 40-49 | Nutrir |
-| NURTURING | < 40 | Baixa prioridade |
+### Sincronizacao com GHL
+- Metodo `sync_to_ghl()` no instagram_dm_agent.py
+- Tags adicionadas: `prospectado`, `outbound-instagram`
+- Custom fields: `outreach_sent_at`, `last_outreach_message`, `source_channel`
 
----
-
-### 3. Sync com GHL via Custom Fields (2026-01-16)
-
-**Custom Fields criados no GHL:**
-- `outreach_sent_at` - Timestamp do último outreach
-- `last_outreach_message` - Última mensagem enviada
-- `source_channel` - Canal de origem (instagram_dm, etc)
-- `icp_score` - Score calculado
-- `lead_priority` - HOT/WARM/COLD
-
-**Tags automáticas:**
-- `prospectado` - Lead já abordado
-- `outbound-instagram` - Origem Instagram
+### Endpoints de Campanha
+- `POST /api/campaign/start` - Inicia campanha em background
+- `GET /api/campaign/{id}` - Status da campanha
+- `GET /api/campaigns` - Lista campanhas (filtro por status)
+- `POST /api/campaign/{id}/stop` - Para campanha
 
 ---
 
-## Padrões de Código Descobertos
+## Padroes de Codigo
 
-### 1. Terminal quebrando comandos Python
+### Async/Await
+- 87% dos endpoints sao async
+- Usar `async def` para I/O bound operations
+- BackgroundTasks para operacoes longas
 
-**Problema:** Comandos multi-linha no terminal eram quebrados em linhas separadas, causando SyntaxError.
+### Error Handling
+```python
+try:
+    # operacao
+except Exception as e:
+    logger.error(f"Error: {e}")
+    return {"success": False, "error": str(e)}
+```
 
-**Solução:** Criar arquivos .py em `/tmp/claude/` e executar separadamente.
-
-```bash
-# Em vez de:
-python3 -c "import x; ..."
-
-# Usar:
-# 1. Criar arquivo /tmp/claude/script.py
-# 2. Executar: python3 /tmp/claude/script.py
+### Logging
+```python
+import logging
+logger = logging.getLogger(__name__)
+logger.info("message", extra={"campaign_id": id})
 ```
 
 ---
 
-### 2. Railway não suporta módulos built-in no requirements.txt
+## Roadmap de Escalabilidade
 
-**Problema:** Build falhava com módulos como `concurrent.futures`, `asyncio`.
+### Prioridade 1 (Semana 1-2)
+1. Redis para campanhas e rate limiting
+2. Connection pooling (httpx)
+3. Retry logic (tenacity)
 
-**Solução:** NÃO incluir no requirements.txt:
-- `concurrent.futures` (built-in Python 3.2+)
-- `asyncio` (built-in Python 3.4+)
-- `asyncio-compat`
+### Prioridade 2 (Semana 3-4)
+1. Celery job queue
+2. Checkpoint system
+3. JWT auth
 
----
-
-### 3. Playwright não funciona no Railway
-
-**Problema:** Railway não tem browser instalado.
-
-**Solução:**
-- Usar Instagram API (Bruno Fraga) para scraping no servidor
-- Playwright apenas LOCAL para demos
+### Prioridade 3 (Semana 5-6)
+1. Structured logging
+2. Prometheus metrics
+3. Sentry integration
 
 ---
 
-## Métricas e Resultados
+## Variaveis de Ambiente
 
-### Teste de Scoring Multi-Tenant (2026-01-16)
-
-**Perfil de teste:**
-```json
-{
-  "username": "pedro.dev",
-  "bio": "CTO | Startup SaaS B2B em SP | Software Developer",
-  "followers_count": 3000
-}
+```
+SUPABASE_URL=https://bfumywvwubvernvhjehk.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<secret>
+GEMINI_API_KEY=<secret>
+OPENAI_API_KEY=<secret>
+GHL_API_KEY=<secret>
+GHL_LOCATION_ID=<secret>
+INSTAGRAM_SESSION_ID=<secret>
 ```
 
-**Resultados:**
-| Tenant | Score | Prioridade | Decisor | Interesses |
-|--------|-------|------------|---------|------------|
-| DEFAULT | 45 | COLD | ❌ | tecnologia |
-| startup_abc | 55 | WARM | ✅ | tecnologia, negocios |
-
-**Conclusão:** Multi-tenant funciona. "CTO" está nas keywords do startup_abc mas não no DEFAULT.
+**ATENCAO:** `.env` estava commitado no git. Rotacionar todas as keys!
 
 ---
 
-## Erros Resolvidos
+## Links Uteis
 
-### 1. Git push rejected (2026-01-16)
-
-**Erro:** `rejected - fetch first`
-
-**Solução:**
-```bash
-git pull origin main --rebase && git push origin main
-```
-
----
-
-### 2. npm ENOTEMPTY (2026-01-16)
-
-**Erro:** `ENOTEMPTY: directory not empty` no node_modules
-
-**Solução:**
-```bash
-rm -rf node_modules package-lock.json && npm install
-```
-
----
-
-## Conhecimentos para RAG
-
-> Estes insights devem ser salvos no Segundo Cérebro (RAG) para referência futura.
-
-**A salvar:**
-1. Arquitetura de scoring multi-tenant
-2. Padrão de cache de configuração
-3. Integração GHL com custom fields
-4. Workaround para terminal multi-linha
+- Railway Dashboard: https://railway.app
+- Supabase: https://supabase.com/dashboard/project/bfumywvwubvernvhjehk
+- API Docs: https://agenticoskevsacademy-production.up.railway.app/docs

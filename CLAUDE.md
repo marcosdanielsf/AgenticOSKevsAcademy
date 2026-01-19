@@ -4,6 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+# 🧠 SISTEMA DE MEMÓRIA ESTENDIDA
+
+> **IMPORTANTE:** Após qualquer reset/compactação de memória, leia estes arquivos ANTES de continuar:
+
+```
+.claude/
+├── context.md    ← O QUE: Objetivo e arquitetura do projeto
+├── todos.md      ← ONDE: Tarefas pendentes e progresso atual
+└── insights.md   ← COMO: Decisões, padrões e conhecimento acumulado
+```
+
+**Ciclo de trabalho:**
+1. **Ler** context.md e todos.md antes de começar
+2. **Atualizar** todos.md ao completar cada tarefa
+3. **Registrar** descobertas importantes em insights.md
+4. **Salvar** antes de qualquer compactação de memória
+
+---
+
 # 🏗️ ARQUITETURA DO SISTEMA - VISÃO GERAL
 
 ## Este Repositório no Ecossistema MOTTIVME Sales
