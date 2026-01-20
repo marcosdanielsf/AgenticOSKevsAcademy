@@ -1,8 +1,175 @@
 # AgenticOS - Insights e Decisoes
 
-> **Atualizado em:** 2026-01-19
-> **Status:** SISTEMA COMPLETO - Segurança 8/10
+> **Atualizado em:** 2026-01-20 (manhã)
+> **Status:** Contexto de Perfil implementado no classify-lead
 > Conhecimento acumulado durante o desenvolvimento
+
+---
+
+## Sessão 2026-01-20 - CONTEXTO DE PERFIL PARA IA DE QUALIFICAÇÃO
+
+### Problema Identificado
+
+**Sintoma:** Agente de qualificação responde de forma genérica/robótica
+- Introduções estranhas: "Alberto Correia por aqui???"
+- Perguntas genéricas quando BDR já viu o perfil do lead
+- Sem personalização baseada na bio/profissão do lead
+
+**Causa Raiz:** O endpoint `/webhook/classify-lead` não recebia contexto do perfil
+
+```
+FLUXO QUEBRADO:
+┌──────────────────────┐      ┌───────────────────┐
+│  Auto Enrich Lead    │ ───► │ Classificar Lead  │
+│  RETORNA: bio,       │      │ RECEBE: username  │
+│  followers, perfil   │      │ message, tags     │
+│                      │      │ NÃO RECEBE: bio!  │
+└──────────────────────┘      └───────────────────┘
+```
+
+### Solução Implementada
+
+#### 1. Novos Modelos Pydantic (`api_server.py`)
+
+```python
+class LeadProfileContext(BaseModel):
+    bio: Optional[str] = None
+    especialidade: Optional[str] = None
+    followers: Optional[int] = None
+    is_verified: Optional[bool] = None
+    source_channel: Optional[str] = None
+
+class ConversationOriginContext(BaseModel):
+    origem: Optional[str] = None  # "outbound" ou "inbound"
+    context_type: Optional[str] = None
+    tom_agente: Optional[str] = None
+    mensagem_abordagem: Optional[str] = None
+
+class ClassifyLeadRequest(BaseModel):
+    # campos existentes...
+    profile_context: Optional[LeadProfileContext] = None
+    origin_context: Optional[ConversationOriginContext] = None
+```
+
+#### 2. Prompt Atualizado do Gemini
+
+O prompt agora:
+- Usa bio/especialidade para entender o lead
+- Considera se é resposta de prospecção (outbound) vs contato orgânico (inbound)
+- Personaliza sugestão de resposta
+- Evita introduções genéricas
+
+#### 3. JSON Body para n8n (arquivo: `.claude/n8n-classificar-lead-ia-novo-body.json`)
+
+```json
+{
+  "profile_context": {
+    "bio": "{{ $('Auto Enrich Lead').first().json.lead_data?.bio }}",
+    "especialidade": "...",
+    "followers": "..."
+  },
+  "origin_context": {
+    "origem": "{{ $json.origem_conversa }}",
+    "context_type": "{{ $json.context_type }}",
+    "tom_agente": "{{ $json.tom_agente }}"
+  }
+}
+```
+
+### Arquivos Modificados
+
+| Arquivo | Mudança |
+|---------|---------|
+| `api_server.py` | Novos modelos + prompt atualizado |
+| `.claude/n8n-classificar-lead-ia-novo-body.json` | JSON body para n8n |
+| `.claude/INSTRUCOES-ATUALIZACAO-N8N.md` | Guia de implementação |
+
+### Próximos Passos
+
+1. ✅ Backend atualizado
+2. ⏳ Atualizar nó "Classificar Lead IA" no n8n
+3. ⏳ Testar com lead real
+4. ⏳ Verificar se especialidade está sendo detectada corretamente
+
+### Padrão Aprendido
+
+Sempre que um agente precisa responder de forma personalizada:
+1. Passar **contexto do perfil** (bio, profissão, seguidores)
+2. Passar **origem da conversa** (outbound vs inbound)
+3. Incluir no prompt instruções para evitar respostas genéricas
+
+---
+
+## Sessão 2026-01-19 (noite) - PALIATIVO BDR
+
+### Insight: API GHL Conversations Search
+
+**Problema:** Contato vem do Instagram (`source: "instagram"`) mas API GHL retorna conversa de outro canal (ex: `TYPE_PHONE`)
+
+**Causa:** Um contato no GHL pode ter múltiplas conversas de canais diferentes. A API retorna a primeira (não necessariamente do Instagram).
+
+**Solução implementada:**
+```python
+# Filtrar por canal específico
+async def _search_conversation(..., channel_filter: Optional[str] = None):
+    if channel_filter:
+        for conv in conversations:
+            conv_type = conv.get("type", "").lower()
+            if channel_filter.lower() in conv_type:  # Ex: "instagram" in "TYPE_INSTAGRAM"
+                return {"conversation": conv, ...}
+```
+
+### Insight: n8n envia null como string
+
+**Problema:** `"channel_filter": null` no JSON do n8n chega como string `"null"` no Python
+
+**Solução:**
+```python
+# api_server.py
+if channel_filter in [None, "null", "None", ""]:
+    channel_filter = None
+```
+
+### Insight: GHL API Key não está no Railway
+
+**Problema:** Endpoint retorna `"GHL_API_KEY não configurada"`
+
+**Solução:** Passar `api_key` no body do request (não confiar apenas em env var)
+```json
+{
+  "contact_id": "...",
+  "api_key": "{{ $('Info').first().json.api_key }}"
+}
+```
+
+### Insight: Decorator @skill envelopa resultado
+
+**Formato do retorno:**
+```python
+{
+    "success": True,
+    "skill": "detect_conversation_origin",
+    "data": { ... resultado real ... },
+    "elapsed_seconds": 0.5
+}
+```
+
+**Extrair no endpoint:**
+```python
+result = await skill_function(...)
+data = result.get("data", result)  # Extrai o data de dentro do envelope
+```
+
+### Tipos de Conversa no GHL
+
+Observados durante testes:
+- `TYPE_PHONE` - Conversa de telefone/SMS
+- `TYPE_INSTAGRAM` - DM de Instagram (esperado)
+- `TYPE_WHATSAPP` - WhatsApp
+- `TYPE_EMAIL` - Email
+- `TYPE_FB` - Facebook Messenger
+
+**Filtro deve usar substring:** `"instagram" in conv_type.lower()`
 
 ---
 

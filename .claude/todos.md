@@ -1,9 +1,76 @@
 # AgenticOS - Lista de Tarefas
 
-> **Atualizado em:** 2026-01-19 (noite)
-> **Status:** 🎉 SISTEMA COMPLETO - Proxy + Stealth + Warm-up + Block Detection
+> **Atualizado em:** 2026-01-19 (23:45)
+> **Status:** 🔧 PALIATIVO BDR em desenvolvimento - detectar origem conversa
 > **Nível de Segurança:** 8/10
 > **Leia este arquivo apos reset de memoria para saber onde parou**
+
+---
+
+## 🚨 SESSÃO ATUAL - PALIATIVO BDR (2026-01-19 noite)
+
+### Contexto do Problema
+BDR prospecta manualmente no Instagram (sem usar AgenticOS). Quando lead responde:
+- n8n não sabe se foi BDR que abordou ou se é novo seguidor orgânico
+- Agente IA precisa saber o contexto para ajustar tom da conversa
+
+### Solução: Skill `detect_conversation_origin`
+Analisa a PRIMEIRA mensagem da conversa no GHL para determinar quem iniciou:
+- `outbound` → BDR enviou primeiro → tags: outbound-instagram, bdr-abordou
+- `inbound` → Lead enviou primeiro → tags: novo-seguidor, inbound-organico
+
+### Arquivos Modificados
+| Arquivo | Mudança |
+|---------|---------|
+| `implementation/skills/detect_conversation_origin.py` | Skill completo com channel_filter e api_key |
+| `implementation/api_server.py` | Endpoint `/api/detect-conversation-origin` |
+| `docs/n8n-paliativo-bdr-COMPLETO.json` | Workflow n8n para importar |
+
+### ⚠️ PROBLEMA ATUAL (onde parou)
+O contato de teste (`qEysNRuQnJ7SSmQJCleD`) não tem conversa de Instagram no GHL.
+- `source: "instagram"` no webhook ✅
+- Mas API GHL retorna: `"Canal instagram não encontrado"`
+
+**Último fix aplicado:**
+```python
+# api_server.py - trata channel_filter "null" como string
+if channel_filter in [None, "null", "None", ""]:
+    channel_filter = None
+```
+
+**Commit pendente de teste:** `fix: handle channel_filter null string from n8n`
+
+### Próximo Passo ao Retomar
+1. Testar no n8n com JSON:
+```json
+{
+  "contact_id": "{{ $('Info').first().json.lead_id }}",
+  "location_id": "{{ $('Info').first().json.location_id }}",
+  "auto_tag": true,
+  "channel_filter": null,
+  "api_key": "{{ $('Info').first().json.api_key }}"
+}
+```
+
+2. Se erro persistir, verificar no GHL se contato tem conversa de Instagram
+3. Se não tiver, testar com outro contato que tenha DM de Instagram
+
+### Endpoint de Teste
+```bash
+curl -X POST "https://agenticoskevsacademy-production.up.railway.app/api/detect-conversation-origin" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contact_id": "ID_DO_CONTATO",
+    "location_id": "xliub5H5pQ4QcDeKHc6F",
+    "auto_tag": false,
+    "channel_filter": null,
+    "api_key": "pit-4a40b7de-e2e0-4090-891f-ea101e80b7c0"
+  }'
+```
+
+### Workflow n8n para Importar
+Arquivo: `docs/n8n-paliativo-bdr-COMPLETO.json`
+- Conectar saída do nó `Info` → entrada do nó `É Primeira Mensagem?`
 
 ---
 

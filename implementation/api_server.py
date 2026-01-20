@@ -228,11 +228,31 @@ class SendDMResponse(BaseModel):
     message_sent: Optional[str] = None
     error: Optional[str] = None
 
+class LeadProfileContext(BaseModel):
+    """Contexto do perfil do lead para classificação inteligente"""
+    bio: Optional[str] = None  # Bio do Instagram
+    especialidade: Optional[str] = None  # Profissão/especialidade detectada
+    followers: Optional[int] = None  # Número de seguidores
+    is_verified: Optional[bool] = None
+    source_channel: Optional[str] = None  # instagram, whatsapp, etc
+
+class ConversationOriginContext(BaseModel):
+    """Contexto da origem da conversa"""
+    origem: Optional[str] = None  # "outbound" (BDR abordou) ou "inbound" (lead iniciou)
+    context_type: Optional[str] = None  # "prospecting_response" ou "inbound_organic"
+    tom_agente: Optional[str] = None  # Tom sugerido para o agente
+    mensagem_abordagem: Optional[str] = None  # Mensagem original de abordagem (se outbound)
+
 class ClassifyLeadRequest(BaseModel):
     username: str
     message: str
     tenant_id: str
     persona_id: Optional[str] = None
+    # NOVOS CAMPOS - Contexto do perfil (v2)
+    profile_context: Optional[LeadProfileContext] = None
+    origin_context: Optional[ConversationOriginContext] = None
+    # Campos legado para compatibilidade
+    context: Optional[Dict[str, Any]] = None  # { source, phone, email, tags }
 
 class ClassifyLeadResponse(BaseModel):
     success: bool
@@ -1628,6 +1648,7 @@ async def classify_lead(request: ClassifyLeadRequest):
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-2.5-flash")
 
+        # Construir contexto do ICP (persona)
         persona_context = ""
         if persona:
             persona_context = f"""
@@ -1636,28 +1657,86 @@ Contexto do ICP:
 - Perfil ideal: {persona.get('icp_profile', '')}
 """
 
-        prompt = f"""Você é um classificador de leads para marketing no Instagram.
+        # NOVO: Construir contexto do perfil do lead
+        profile_context = ""
+        if request.profile_context:
+            pc = request.profile_context
+            profile_parts = []
+            if pc.bio:
+                profile_parts.append(f"- Bio: {pc.bio}")
+            if pc.especialidade:
+                profile_parts.append(f"- Especialidade/Profissão: {pc.especialidade}")
+            if pc.followers:
+                profile_parts.append(f"- Seguidores: {pc.followers}")
+            if pc.is_verified:
+                profile_parts.append("- Perfil verificado: Sim")
+            if profile_parts:
+                profile_context = "Contexto do Perfil do Lead:\n" + "\n".join(profile_parts)
 
-Analise esta mensagem recebida de @{request.username}:
-"{request.message}"
+        # NOVO: Construir contexto da origem da conversa
+        origin_context = ""
+        if request.origin_context:
+            oc = request.origin_context
+            if oc.origem == "outbound":
+                origin_context = f"""
+Contexto da Conversa (IMPORTANTE):
+- ORIGEM: Outbound - NOSSA EQUIPE ABORDOU ESTE LEAD PRIMEIRO
+- O BDR já viu o perfil e identificou potencial antes de abordar
+- Tom sugerido: {oc.tom_agente or 'direto, dando continuidade à abordagem'}
+- Esta é uma RESPOSTA à nossa prospecção, não uma primeira interação fria
+"""
+                if oc.mensagem_abordagem:
+                    origin_context += f"- Mensagem de abordagem original: {oc.mensagem_abordagem}\n"
+            elif oc.origem == "inbound":
+                origin_context = f"""
+Contexto da Conversa:
+- ORIGEM: Inbound - LEAD INICIOU O CONTATO (novo seguidor/mensagem espontânea)
+- Tom sugerido: {oc.tom_agente or 'receptivo, qualificar interesse'}
+- Esta é uma primeira interação orgânica
+"""
 
+        prompt = f"""Você é um classificador de leads inteligente para prospecção no Instagram.
+
+LEAD: @{request.username}
+MENSAGEM RECEBIDA: "{request.message}"
+
+{profile_context}
+{origin_context}
 {persona_context}
 
-Classifique esta mensagem em UMA das categorias:
-- LEAD_HOT: Interesse claro em comprar/contratar (ex: "quanto custa?", "quero saber mais")
-- LEAD_WARM: Interesse moderado, engajamento positivo (ex: "legal seu conteúdo", "me conta mais")
-- LEAD_COLD: Primeira interação, sem interesse claro ainda
-- PESSOAL: Mensagem pessoal, não é lead (amigo, família, parceiro)
+REGRAS DE CLASSIFICAÇÃO:
+1. Se temos CONTEXTO DE PERFIL (bio/especialidade), use-o para entender melhor a intenção
+2. Se a ORIGEM é "outbound" (BDR abordou), o lead está RESPONDENDO nossa prospecção:
+   - Qualquer resposta engajada = mínimo LEAD_WARM
+   - Respostas positivas/curiosas = LEAD_HOT
+   - Apenas "ok", "hum" = LEAD_COLD
+3. Se a ORIGEM é "inbound", avalie o interesse demonstrado na mensagem
+
+CATEGORIAS:
+- LEAD_HOT: Interesse claro em comprar/contratar (pergunta preço, pede info, demonstra urgência)
+- LEAD_WARM: Engajamento positivo, quer saber mais, resposta educada a prospecção
+- LEAD_COLD: Primeira interação fria, resposta vaga, sem interesse claro
+- PESSOAL: Mensagem pessoal (amigo, família, parceiro) - NÃO é lead
 - SPAM: Propaganda, bot, mensagem irrelevante
 
-Também dê uma pontuação de 0 a 100 para o potencial deste lead.
+PONTUAÇÃO (0-100):
+- 80-100: Lead pronto para conversão
+- 60-79: Lead qualificado, precisa mais nutrição
+- 40-59: Lead frio, baixa probabilidade
+- 0-39: Não é lead ou spam
+
+IMPORTANTE para suggested_response:
+- Se temos bio/especialidade, personalize a resposta mencionando algo do perfil
+- Se é resposta de prospecção (outbound), continue a conversa naturalmente
+- NUNCA use introduções genéricas como "Alberto Correia por aqui" ou similar
+- Seja direto e relevante ao contexto
 
 Responda APENAS em JSON:
 {{
     "classification": "LEAD_HOT|LEAD_WARM|LEAD_COLD|PESSOAL|SPAM",
     "score": 0-100,
-    "reasoning": "explicação curta",
-    "suggested_response": "sugestão de resposta ou null"
+    "reasoning": "explicação curta baseada no contexto disponível",
+    "suggested_response": "resposta personalizada ou null se não aplicável"
 }}
 """
 

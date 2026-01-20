@@ -1,0 +1,27 @@
+{
+  "username": "{{ $('Info').first().json.first_name || 'lead' }}",
+  "message": "{{ $('Mensagem recebida').first().json.body?.message?.body || $('Mensagem recebida').first().json.body?.lastMessage?.body || '' }}",
+  "tenant_id": "{{ $('Info').first().json.location_id || 'default' }}",
+
+  "profile_context": {
+    "bio": "{{ $('Auto Enrich Lead').first().json.lead_data?.bio || $('Auto Enrich Lead').first().json.bio || '' }}",
+    "especialidade": "{{ $('Auto Enrich Lead').first().json.lead_data?.detected_specialty || $('Auto Enrich Lead').first().json.profile_analysis?.specialty || '' }}",
+    "followers": "{{ $('Auto Enrich Lead').first().json.lead_data?.followers_count || $('Auto Enrich Lead').first().json.followers_count || 0 }}",
+    "is_verified": "{{ $('Auto Enrich Lead').first().json.lead_data?.is_verified || false }}",
+    "source_channel": "{{ $('Info').first().json.source || 'instagram' }}"
+  },
+
+  "origin_context": {
+    "origem": "{{ $json.origem_conversa || $('Info').first().json.origem_conversa || '' }}",
+    "context_type": "{{ $json.context_type || $('Info').first().json.context_type || '' }}",
+    "tom_agente": "{{ $json.tom_agente || $('Info').first().json.tom_agente || '' }}",
+    "mensagem_abordagem": ""
+  },
+
+  "context": {
+    "source": "{{ $('Mensagem recebida').first().json.body?.contact?.attributionSource?.medium || $('Mensagem recebida').first().json.body?.contact_source || 'unknown' }}",
+    "phone": "{{ $('Info').first().json.telefone || $('Mensagem recebida').first().json.body?.phone || '' }}",
+    "email": "{{ $('Info').first().json.email || '' }}",
+    "tags": "{{ $('Mensagem recebida').first().json.body?.tags || '' }}"
+  }
+}
