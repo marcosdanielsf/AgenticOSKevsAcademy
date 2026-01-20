@@ -47,7 +47,7 @@ def _get_ghl_headers(api_key: Optional[str] = None) -> Dict[str, str]:
     }
 
 
-async def _search_conversation(contact_id: str, location_id: str, api_key: Optional[str] = None, channel_filter: Optional[str] = None) -> Optional[Dict]:
+async def _search_conversation(contact_id: str, location_id: str, api_key: Optional[str] = None, channel_filter: Optional[str] = None) -> Dict:
     """
     Busca a conversa de um contato no GHL.
 
@@ -55,6 +55,12 @@ async def _search_conversation(contact_id: str, location_id: str, api_key: Optio
 
     Args:
         channel_filter: Filtrar por canal específico ("instagram", "whatsapp", "sms", etc.)
+
+    Returns:
+        Dict com:
+        - conversation: dados da conversa encontrada (ou None)
+        - all_types: lista de tipos de conversa disponíveis (para debug)
+        - error: mensagem de erro se houver
     """
     headers = _get_ghl_headers(api_key)
 
@@ -71,14 +77,15 @@ async def _search_conversation(contact_id: str, location_id: str, api_key: Optio
 
             if response.status_code != 200:
                 logger.error(f"Erro ao buscar conversa: {response.status_code} - {response.text}")
-                return None
+                return {"conversation": None, "all_types": [], "error": f"API error: {response.status_code}"}
 
             data = response.json()
             conversations = data.get("conversations", [])
+            all_types = [c.get("type", "unknown") for c in conversations]
 
             if not conversations:
                 logger.info(f"Nenhuma conversa encontrada para contact {contact_id}")
-                return None
+                return {"conversation": None, "all_types": [], "error": "Nenhuma conversa no GHL"}
 
             # Se channel_filter especificado, busca a conversa do canal correto
             if channel_filter:
@@ -89,18 +96,18 @@ async def _search_conversation(contact_id: str, location_id: str, api_key: Optio
                     # Ex: "TYPE_INSTAGRAM" contém "instagram"
                     if channel_lower in conv_type:
                         logger.info(f"Conversa do canal {channel_filter} encontrada: {conv.get('id')}")
-                        return conv
+                        return {"conversation": conv, "all_types": all_types, "error": None}
 
                 # Nenhuma conversa do canal encontrada
-                logger.info(f"Nenhuma conversa do canal {channel_filter} para contact {contact_id}. Tipos disponíveis: {[c.get('type') for c in conversations]}")
-                return None
+                logger.info(f"Nenhuma conversa do canal {channel_filter} para contact {contact_id}. Tipos disponíveis: {all_types}")
+                return {"conversation": None, "all_types": all_types, "error": f"Canal {channel_filter} não encontrado"}
 
             # Retorna a primeira (mais recente por padrão)
-            return conversations[0]
+            return {"conversation": conversations[0], "all_types": all_types, "error": None}
 
         except Exception as e:
             logger.error(f"Exceção ao buscar conversa: {e}")
-            return None
+            return {"conversation": None, "all_types": [], "error": str(e)}
 
 
 async def _get_conversation_messages(conversation_id: str, limit: int = 50, api_key: Optional[str] = None) -> List[Dict]:
@@ -194,13 +201,18 @@ async def detect_conversation_origin(
         }
 
     # 1. Buscar conversa do contato (já filtrando pelo canal se especificado)
-    conversation = await _search_conversation(contact_id, location_id, effective_api_key, channel_filter)
+    search_result = await _search_conversation(contact_id, location_id, effective_api_key, channel_filter)
+    conversation = search_result.get("conversation")
+    all_types = search_result.get("all_types", [])
 
     if not conversation:
         return {
             "origin": "unknown",
-            "error": "Nenhuma conversa encontrada",
-            "contact_id": contact_id
+            "error": search_result.get("error", "Nenhuma conversa encontrada"),
+            "contact_id": contact_id,
+            "available_conversation_types": all_types,
+            "channel_filter_used": channel_filter,
+            "debug_hint": "Verifique se o contato tem conversa do canal especificado no GHL"
         }
 
     conversation_id = conversation.get("id")
