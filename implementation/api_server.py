@@ -3752,16 +3752,24 @@ async def detect_conversation_origin_endpoint(request: ConversationOriginRequest
     try:
         from skills.detect_conversation_origin import detect_conversation_origin
 
+        # Tratar channel_filter que pode vir como string "null" do n8n
+        channel_filter = request.channel_filter
+        if channel_filter in [None, "null", "None", ""]:
+            channel_filter = None
+
         result = await detect_conversation_origin(
             contact_id=request.contact_id,
             location_id=request.location_id,
             auto_tag=request.auto_tag,
-            channel_filter=request.channel_filter,
+            channel_filter=channel_filter,
             api_key=request.api_key
         )
 
-        # Extrair data do wrapper do skill
-        data = result.get("data", result)
+        # Extrair data do wrapper do skill (skill decorator envelopa em {"data": ...})
+        if isinstance(result, dict):
+            data = result.get("data", result)
+        else:
+            data = {"error": f"Unexpected result type: {type(result)}", "origin": "unknown"}
 
         return ConversationOriginResponse(
             origin=data.get("origin", "unknown"),
