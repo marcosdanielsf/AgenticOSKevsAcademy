@@ -3798,6 +3798,10 @@ class ConversationOriginResponse(BaseModel):
     contact_id: str
     agent_context: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    # Campos de debug para diagnóstico
+    available_conversation_types: Optional[List[str]] = None  # Tipos de conversa disponíveis no GHL
+    channel_filter_used: Optional[str] = None  # Filtro de canal usado na busca
+    debug_hint: Optional[str] = None  # Dica de debug
 
 @app.post("/api/detect-conversation-origin", response_model=ConversationOriginResponse)
 async def detect_conversation_origin_endpoint(request: ConversationOriginRequest):
@@ -3862,7 +3866,11 @@ async def detect_conversation_origin_endpoint(request: ConversationOriginRequest
             tags_added=data.get("tags_added", []),
             contact_id=request.contact_id,
             agent_context=data.get("agent_context"),
-            error=data.get("error")
+            error=data.get("error"),
+            # Campos de debug
+            available_conversation_types=data.get("available_conversation_types"),
+            channel_filter_used=data.get("channel_filter_used"),
+            debug_hint=data.get("debug_hint")
         )
 
     except Exception as e:
