@@ -3849,37 +3849,102 @@ async def detect_conversation_origin_endpoint(request: ConversationOriginRequest
         )
 
         # Extrair data do wrapper do skill (skill decorator envelopa em {"data": ...})
+        # O decorator retorna: {"success": bool, "skill": str, "data": {...}, "elapsed_seconds": float}
+        # ou em caso de erro: {"success": false, "skill": str, "error": str, ...}
+        data = {}
         if isinstance(result, dict):
-            data = result.get("data", result)
+            # Se tem "data" e é dict, usar
+            if "data" in result and isinstance(result.get("data"), dict):
+                data = result["data"]
+            # Se não tem "data" mas tem "error" (falha no decorator), criar resposta de erro
+            elif result.get("success") is False and "error" in result:
+                error_msg = result.get("error", "Erro desconhecido")
+                # Garantir que error é string
+                if not isinstance(error_msg, str):
+                    error_msg = str(error_msg) if error_msg else "Erro desconhecido"
+                data = {
+                    "origin": "unknown",
+                    "origin_label": f"Erro: {error_msg}",
+                    "error": error_msg,
+                    "contact_id": request.contact_id
+                }
+            # Se result já é o data direto (sem wrapper)
+            elif "origin" in result:
+                data = result
+            else:
+                data = {"error": f"Formato de resposta inesperado", "origin": "unknown"}
         else:
-            data = {"error": f"Unexpected result type: {type(result)}", "origin": "unknown"}
+            # result não é dict - erro crítico
+            data = {"error": f"Tipo de resultado inesperado: {type(result).__name__}", "origin": "unknown"}
+
+        # Garantir que todos os valores têm tipos corretos antes de passar para Pydantic
+        def safe_str(val, default=""):
+            """Converte valor para string de forma segura"""
+            if val is None:
+                return default
+            if isinstance(val, str):
+                return val
+            return str(val) if val else default
+
+        def safe_int(val):
+            """Converte valor para int de forma segura"""
+            if val is None:
+                return None
+            if isinstance(val, int):
+                return val
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                return None
+
+        def safe_list(val, default=None):
+            """Converte valor para lista de forma segura"""
+            if default is None:
+                default = []
+            if val is None:
+                return default
+            if isinstance(val, list):
+                return val
+            return default
+
+        def safe_dict(val):
+            """Converte valor para dict de forma segura"""
+            if val is None:
+                return None
+            if isinstance(val, dict):
+                return val
+            return None
 
         return ConversationOriginResponse(
-            origin=data.get("origin", "unknown"),
-            origin_label=data.get("origin_label", ""),
-            first_message_direction=data.get("first_message_direction"),
-            first_message_date=data.get("first_message_date"),
-            first_message_preview=data.get("first_message_preview"),
-            conversation_id=data.get("conversation_id"),
-            conversation_type=data.get("conversation_type"),
-            total_messages=data.get("total_messages"),
-            tags_added=data.get("tags_added", []),
+            origin=safe_str(data.get("origin"), "unknown"),
+            origin_label=safe_str(data.get("origin_label"), ""),
+            first_message_direction=data.get("first_message_direction") if isinstance(data.get("first_message_direction"), str) else None,
+            first_message_date=data.get("first_message_date") if isinstance(data.get("first_message_date"), str) else None,
+            first_message_preview=data.get("first_message_preview") if isinstance(data.get("first_message_preview"), str) else None,
+            conversation_id=data.get("conversation_id") if isinstance(data.get("conversation_id"), str) else None,
+            conversation_type=data.get("conversation_type") if isinstance(data.get("conversation_type"), str) else None,
+            total_messages=safe_int(data.get("total_messages")),
+            tags_added=safe_list(data.get("tags_added"), []),
             contact_id=request.contact_id,
-            agent_context=data.get("agent_context"),
-            error=data.get("error"),
+            agent_context=safe_dict(data.get("agent_context")),
+            error=safe_str(data.get("error")) if data.get("error") else None,
             # Campos de debug
-            available_conversation_types=data.get("available_conversation_types"),
-            channel_filter_used=data.get("channel_filter_used"),
-            debug_hint=data.get("debug_hint")
+            available_conversation_types=safe_list(data.get("available_conversation_types")),
+            channel_filter_used=data.get("channel_filter_used") if isinstance(data.get("channel_filter_used"), str) else None,
+            debug_hint=data.get("debug_hint") if isinstance(data.get("debug_hint"), str) else None
         )
 
     except Exception as e:
         logger.error(f"Error detecting conversation origin: {e}", exc_info=True)
+        # Garantir mensagem de erro legível
+        error_msg = str(e) if e else "Erro desconhecido na detecção"
+        if not error_msg or error_msg == "0":
+            error_msg = f"{type(e).__name__}: Erro interno"
         return ConversationOriginResponse(
             origin="unknown",
             origin_label="Erro na detecção",
             contact_id=request.contact_id,
-            error=str(e)
+            error=error_msg
         )
 
 
