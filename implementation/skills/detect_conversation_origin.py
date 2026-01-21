@@ -228,10 +228,23 @@ async def detect_conversation_origin(
             "conversation_id": conversation_id
         }
 
+    # 2.5. Filtrar apenas mensagens que são dicts válidos
+    # (API do GHL às vezes retorna formatos inesperados)
+    valid_messages = [m for m in messages if isinstance(m, dict)]
+
+    if not valid_messages:
+        logger.error(f"Mensagens em formato inválido para conversa {conversation_id}: {type(messages[0]) if messages else 'empty'}")
+        return {
+            "origin": "unknown",
+            "error": f"Formato de mensagens inválido (tipo: {type(messages[0]).__name__ if messages else 'none'})",
+            "conversation_id": conversation_id,
+            "raw_messages_sample": str(messages[:2]) if messages else None
+        }
+
     # 3. Ordenar por data (mais antiga primeiro)
     # GHL retorna em ordem decrescente (mais recente primeiro), então invertemos
     messages_sorted = sorted(
-        messages,
+        valid_messages,
         key=lambda m: m.get("dateAdded", m.get("createdAt", ""))
     )
 
@@ -273,7 +286,7 @@ async def detect_conversation_origin(
         "first_message_preview": first_body,
         "conversation_id": conversation_id,
         "conversation_type": conversation_type,
-        "total_messages": len(messages),
+        "total_messages": len(valid_messages),
         "tags_added": tags_added,
         "contact_id": contact_id
     }
