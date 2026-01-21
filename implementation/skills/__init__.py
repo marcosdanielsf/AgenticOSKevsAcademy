@@ -150,6 +150,11 @@ try:
     from . import update_ghl_contact
     from . import get_lead_by_channel
     from . import detect_conversation_origin
+    # Novas skills v2 (2026-01-21)
+    from . import get_ghl_contact
+    from . import scrape_instagram_profile
+    from . import analyze_message_intent
+    from . import enrich_and_detect_origin  # Orquestrador
     logger.info(f"[REGISTRY] {len(SkillRegistry._skills)} skills carregados")
 except ImportError as e:
     logger.warning(f"[REGISTRY] Erro ao carregar skills: {e}")

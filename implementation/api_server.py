@@ -3948,6 +3948,151 @@ async def detect_conversation_origin_endpoint(request: ConversationOriginRequest
         )
 
 
+# =====================================================
+# NOVO ENDPOINT v2: Enrich + Detect Origin (Orquestrado)
+# =====================================================
+
+class EnrichAndDetectRequest(BaseModel):
+    """Request para o endpoint orquestrado de enrich + detect."""
+    contact_id: str
+    api_key: str
+    message: Optional[str] = None
+    location_id: Optional[str] = None
+    session_id: Optional[str] = None  # Instagram session ID
+    skip_scrape: Optional[bool] = False
+    skip_analysis: Optional[bool] = False
+
+
+class ProfileContext(BaseModel):
+    """Contexto do perfil do Instagram."""
+    bio: Optional[str] = None
+    followers: Optional[int] = None
+    following: Optional[int] = None
+    is_verified: Optional[bool] = None
+    is_business: Optional[bool] = None
+    category: Optional[str] = None
+    specialty: Optional[str] = None
+    audience_size: Optional[str] = None
+    profile_summary: Optional[str] = None
+    external_url: Optional[str] = None
+
+
+class OriginContext(BaseModel):
+    """Contexto da análise de origem."""
+    origin: Optional[str] = None
+    confidence: Optional[float] = None
+    reasoning: Optional[str] = None
+    detected_context: Optional[str] = None
+    is_response: Optional[bool] = None
+    analysis_method: Optional[str] = None
+    fallback_reason: Optional[str] = None
+
+
+class AgentContext(BaseModel):
+    """Contexto para o agente de qualificação."""
+    should_activate: Optional[bool] = True
+    context_type: Optional[str] = None
+    tom_agente: Optional[str] = None
+    source_channel: Optional[str] = None
+    recommendation: Optional[str] = None
+    avoid: Optional[str] = None
+    personalization_hint: Optional[str] = None
+
+
+class EnrichAndDetectResponse(BaseModel):
+    """Response do endpoint orquestrado."""
+    success: bool = False
+    contact_id: str
+    origin: str = "unknown"
+    origin_label: Optional[str] = None
+    origin_confidence: float = 0.0
+    instagram_username: Optional[str] = None
+    profile_photo: Optional[str] = None
+    ghl_tags: Optional[List[str]] = []
+    profile_context: Optional[ProfileContext] = None
+    origin_context: Optional[OriginContext] = None
+    agent_context: Optional[AgentContext] = None
+    skills_executed: Optional[List[str]] = []
+    errors: Optional[List[str]] = []
+
+
+@app.post("/api/enrich-and-detect-origin", response_model=EnrichAndDetectResponse)
+async def enrich_and_detect_origin_endpoint(request: EnrichAndDetectRequest):
+    """
+    ENDPOINT ORQUESTRADO v2: Enriquece lead + Detecta origem da conversa.
+
+    Orquestra 3 skills em paralelo:
+    1. get_ghl_contact → Busca contato no GHL, extrai username do Instagram
+    2. scrape_instagram_profile → Bio, seguidores, especialidade
+    3. analyze_message_intent → Detecta se é resposta (outbound) ou iniciativa (inbound)
+
+    Retorna tudo consolidado para o agente de qualificação usar.
+
+    Exemplo de uso no n8n:
+    ```
+    POST https://agenticoskevsacademy-production.up.railway.app/api/enrich-and-detect-origin
+    {
+        "contact_id": "{{ $('Info').first().json.lead_id }}",
+        "api_key": "{{ $('Info').first().json.api_key }}",
+        "message": "{{ $('Mensagem recebida').first().json.body?.message?.body }}"
+    }
+    ```
+
+    Response inclui:
+    - origin: "outbound" | "inbound" | "unknown"
+    - profile_context: { bio, followers, specialty, ... }
+    - agent_context: { tom_agente, recommendation, ... }
+    """
+    logger.info(f"[ENRICH-DETECT] Starting for contact {request.contact_id}")
+
+    try:
+        from skills.enrich_and_detect_origin import enrich_and_detect_origin
+
+        result = await enrich_and_detect_origin(
+            contact_id=request.contact_id,
+            api_key=request.api_key,
+            message=request.message or "",
+            location_id=request.location_id,
+            session_id=request.session_id,
+            skip_scrape=request.skip_scrape or False,
+            skip_analysis=request.skip_analysis or False
+        )
+
+        # Extrair data do wrapper do skill
+        data = result.get("data", result) if result.get("success") else result
+
+        # Construir response
+        profile_ctx = data.get("profile_context", {})
+        origin_ctx = data.get("origin_context", {})
+        agent_ctx = data.get("agent_context", {})
+
+        return EnrichAndDetectResponse(
+            success=data.get("success", False),
+            contact_id=request.contact_id,
+            origin=data.get("origin", "unknown"),
+            origin_label=data.get("origin_label"),
+            origin_confidence=data.get("origin_confidence", 0.0),
+            instagram_username=data.get("instagram_username"),
+            profile_photo=data.get("profile_photo"),
+            ghl_tags=data.get("ghl_tags", []),
+            profile_context=ProfileContext(**profile_ctx) if profile_ctx else None,
+            origin_context=OriginContext(**origin_ctx) if origin_ctx else None,
+            agent_context=AgentContext(**agent_ctx) if agent_ctx else None,
+            skills_executed=data.get("skills_executed", []),
+            errors=data.get("errors", [])
+        )
+
+    except Exception as e:
+        logger.error(f"[ENRICH-DETECT] Error: {e}", exc_info=True)
+        return EnrichAndDetectResponse(
+            success=False,
+            contact_id=request.contact_id,
+            origin="unknown",
+            origin_label="Erro no processamento",
+            errors=[str(e)]
+        )
+
+
 @app.get("/api/health")
 async def api_health_check():
     """
